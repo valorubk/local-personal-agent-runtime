@@ -13,7 +13,7 @@
 
 #### Scenario: 展示启动 Banner
 - **WHEN** 用户启动交互式 Session
-- **THEN** CLI 展示带边框的彩虹色 `BABYFACE` Banner，在大字下方展示 `- Your Local Personal Agent -`，且 Banner 内不展示退出命令说明
+- **THEN** CLI 展示带边框的彩虹色 `BABYFACE` Banner，在大字下方居中展示 `- Your Local Personal Agent -`，且 Banner 内不展示退出命令说明
 
 #### Scenario: 多轮对话
 - **WHEN** 用户在同一个 Session 中连续输入多个自然语言请求

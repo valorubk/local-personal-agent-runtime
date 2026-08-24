@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from rich.align import Align
 from rich.panel import Panel
 from rich.text import Text
 
@@ -54,7 +55,7 @@ def build_startup_banner() -> Panel:
     _append_rainbow_text(text, "- Your Local Personal Agent -")
 
     return Panel(
-        text,
+        Align.center(text, vertical="middle"),
         border_style="bright_magenta",
         padding=(1, 2),
     )

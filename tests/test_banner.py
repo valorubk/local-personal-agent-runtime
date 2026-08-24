@@ -1,5 +1,7 @@
 import unittest
 
+from rich.align import Align
+
 from personal_agent.cli.banner import build_startup_banner
 
 
@@ -8,9 +10,12 @@ class BannerTests(unittest.TestCase):
         """防止启动 Banner 退回普通中文提示，或把退出说明又塞回 Banner。"""
 
         banner = build_startup_banner()
-        plain_text = banner.renderable.plain
+        plain_text = banner.renderable.renderable.plain
         lines = [line for line in plain_text.splitlines() if line.strip()]
 
+        self.assertIsInstance(banner.renderable, Align)
+        self.assertEqual(banner.renderable.align, "center")
+        self.assertEqual(banner.renderable.vertical, "middle")
         self.assertNotEqual(lines[0], "BABYFACE")
         self.assertIn("- Your Local Personal Agent -", plain_text)
         self.assertNotIn("exit", plain_text)

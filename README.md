@@ -104,7 +104,7 @@ MODEL = "your-model"
 babyface
 ```
 
-启动后会先展示一个带边框的彩虹色 `BABYFACE` Banner，并在大字下方显示 `- Your Local Personal Agent -`。
+启动后会先展示一个带边框的彩虹色 `BABYFACE` Banner，并在大字下方居中显示 `- Your Local Personal Agent -`。
 
 进入 Session 后可以连续对话：
 
