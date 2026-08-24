@@ -11,9 +11,33 @@
 - **WHEN** 用户在项目环境中运行 `babyface`
 - **THEN** 系统进入可连续输入自然语言的交互式 Session
 
+#### Scenario: 展示启动 Banner
+- **WHEN** 用户启动交互式 Session
+- **THEN** CLI 展示带边框的彩虹色 `BABYFACE` Banner，且 Banner 内不展示退出命令说明
+
 #### Scenario: 多轮对话
 - **WHEN** 用户在同一个 Session 中连续输入多个自然语言请求
 - **THEN** 系统为每个请求返回 Agent 回答，并保持 Session 继续可用
+
+#### Scenario: Help 展示退出命令
+- **WHEN** 用户运行 `babyface --help`
+- **THEN** CLI help 展示 `exit`、`quit` 和 `/exit` 的 Session 退出方式
+
+#### Scenario: 内部异常时保持 Session 可用
+- **WHEN** 一轮对话内部出现未预期异常
+- **THEN** CLI 不展示 Python traceback，改为展示中文友好错误提示，并保持 Session 继续可用
+
+#### Scenario: 输入包含无法直接编码的特殊字符
+- **WHEN** 用户输入中包含无法编码为标准 UTF-8 的特殊字符
+- **THEN** Agent Runtime 在调用 LLM 和保存 Memory 前将异常字符替换为安全占位字符，避免 Session 崩溃
+
+#### Scenario: 支持终端输入行编辑
+- **WHEN** 用户在交互式输入行中按上下左右方向键或 Delete
+- **THEN** CLI 尽量使用终端行编辑能力处理这些按键，不应把 `^[[A`、`^[[B`、`^[[D`、`^[[C` 这类 escape sequence 当作普通文本输入
+
+#### Scenario: 输入提示符不可被删除
+- **WHEN** 用户在输入行开头按退格键
+- **THEN** CLI 保留 `> ` 提示符，用户只能编辑提示符之后的输入内容
 
 #### Scenario: 退出 Session
 - **WHEN** 用户输入 `exit`、`quit` 或 `/exit`
@@ -24,7 +48,11 @@
 
 #### Scenario: 展示 Markdown 回答
 - **WHEN** Agent 返回包含 Markdown 结构的回答
-- **THEN** CLI 在终端中以可读格式渲染该回答
+- **THEN** CLI 在终端中以可读格式渲染该回答，并使用 `Babyface:` 作为回复标签
+
+#### Scenario: 回复与用户输入保持上下间距
+- **WHEN** Agent 输出最终回复
+- **THEN** CLI 在回复标签前和回复正文后输出空行，避免回复与上一轮或下一轮用户输入挤在一起
 
 #### Scenario: 展示 Tool 调用
 - **WHEN** Agent 决定调用本地 Tool
@@ -118,6 +146,14 @@
 #### Scenario: 保存用户 Profile 信息
 - **WHEN** 用户明确要求 Agent 记住长期个人信息
 - **THEN** 系统将该信息保存到 Profile Memory
+
+#### Scenario: 在同一 Session 中传递短期对话历史
+- **WHEN** 用户在同一个 CLI Session 中连续进行多轮对话
+- **THEN** Agent Runtime 将之前轮次的用户输入和 Agent 回答作为短期记忆传入后续 LLM 推理
+
+#### Scenario: 使用自然语言表达记住偏好
+- **WHEN** 用户使用“记住，我不爱吃梅菜扣肉”或“我不爱吃梅菜扣肉，记住它”这类自然语言表达长期记忆请求
+- **THEN** 系统将用户希望记住的信息保存到 Profile Memory
 
 ### Requirement: 预留未来 RAG 检索接口
 系统 SHALL 在 Memory 能力中预留知识检索接口，以支持未来 RAG 迭代，但 V1 不要求实现 embeddings、vector search、chunking 或文档 ingestion。
