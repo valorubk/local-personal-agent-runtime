@@ -9,8 +9,10 @@ class BannerTests(unittest.TestCase):
 
         banner = build_startup_banner()
         plain_text = banner.renderable.plain
+        lines = [line for line in plain_text.splitlines() if line.strip()]
 
-        self.assertIn("BABYFACE", plain_text)
+        self.assertNotEqual(lines[0], "BABYFACE")
+        self.assertIn("- Your Local Personal Agent -", plain_text)
         self.assertNotIn("exit", plain_text)
         self.assertNotIn("quit", plain_text)
         self.assertNotIn("/exit", plain_text)

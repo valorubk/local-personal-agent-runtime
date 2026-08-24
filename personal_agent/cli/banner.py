@@ -36,12 +36,8 @@ def build_startup_banner() -> Panel:
 
     text = Text()
 
-    # 先放一行真实的品牌文本，确保用户和测试都能明确看到 `BABYFACE`。
-    _append_rainbow_text(text, "BABYFACE")
-    text.append("\n\n")
-
-    # 再放大号 ASCII 字体，增强启动时的仪式感。
-    # 这里继续逐字符上色，让整块 Banner 呈现彩虹效果。
+    # 大号 ASCII 字体是启动时的主视觉。
+    # 这里逐字符上色，让整块 Banner 呈现彩虹效果。
     color_index = 0
     for character in BABYFACE_ASCII:
         if character == "\n":
@@ -52,6 +48,10 @@ def build_startup_banner() -> Panel:
             continue
         text.append(character, style=RAINBOW_STYLES[color_index % len(RAINBOW_STYLES)])
         color_index += 1
+    text.append("\n\n")
+
+    # 底部 tagline 使用和原先小标题一致的彩虹色，让视觉有一个轻巧收尾。
+    _append_rainbow_text(text, "- Your Local Personal Agent -")
 
     return Panel(
         text,
