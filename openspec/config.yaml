@@ -1,0 +1,30 @@
+schema: spec-driven
+
+context: |
+  项目目标：构建本地优先的个人 Agent Runtime。V1 主入口是 `babyface` 交互式 CLI，不提供 HTTP API。
+  技术栈：Python 3.12、OpenAI SDK、LangGraph、Pydantic、Typer、Rich、SQLite。
+  文档规范：所有说明性内容使用中文；命令名、包名、环境变量、依赖库名称和代码标识可以保留英文。
+  实现原则：优先快速跑通最小可运行版本，保持模块化，不做 Docker、前端、RAG、Scheduler 或 Multi-Agent。
+
+rules:
+  proposal:
+    - 使用中文说明变更动机、范围和影响。
+    - 明确区分 V1 目标和非目标。
+  specs:
+    - 使用中文描述用户可见行为和可验证场景。
+    - 避免把内部实现步骤写进行为规格。
+  design:
+    - 使用中文说明关键技术决策、取舍和风险。
+    - 对 LangGraph、Shell 二次确认、流式输出和 SQLite 位置给出明确设计。
+  tasks:
+    - 使用中文任务描述。
+    - 每个任务必须小到可以单独验证。
+
+operations:
+  apply:
+    guidance:
+      - 先实现可测试的核心模块，再接入真实 CLI。
+      - 每完成一组任务都运行对应测试或最小验证命令。
+  archive:
+    guidance:
+      - 归档前总结规格变更、实现结果和验证结果。
