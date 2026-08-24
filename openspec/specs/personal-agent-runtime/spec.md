@@ -76,6 +76,10 @@
 - **WHEN** 用户配置了有效的 API key、模型和可选 base URL
 - **THEN** Agent 使用这些配置调用 LLM 并生成回复
 
+#### Scenario: 读取用户目录配置
+- **WHEN** 用户未显式传入配置文件且当前目录不存在 `babyface.toml`
+- **THEN** 系统尝试读取用户目录下的 `~/.babyface/config.toml`
+
 #### Scenario: 缺少 API key
 - **WHEN** 用户未配置 API key
 - **THEN** 系统拒绝启动需要 LLM 的 Agent Session，并显示清晰的中文错误说明

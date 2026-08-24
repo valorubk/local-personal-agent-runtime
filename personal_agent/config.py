@@ -38,7 +38,7 @@ def load_settings(
 
     这个函数是配置层的唯一入口。它同时支持：
     1. 环境变量，例如 `OPENAI_API_KEY`
-    2. TOML 配置文件，例如 `babyface.local.toml`
+    2. TOML 配置文件，例如 `babyface.local.toml` 或 `~/.babyface/config.toml`
 
     参数里允许传入 `env`，主要是为了测试。测试时不应该真的修改系统环境变量，
     所以我们可以传一个普通 dict 进来模拟环境。
@@ -109,12 +109,18 @@ def _load_config_file(
     # 1. CLI 通过 `--config` 传入的路径
     # 2. 环境变量 `BABYFACE_CONFIG_PATH`
     # 3. 当前目录下默认 `babyface.toml`
+    # 4. 用户目录下默认 `~/.babyface/config.toml`
+    #
+    # 第 4 条是为了让用户可以在任意目录直接运行 `babyface`，
+    # 不必每次都带 `--config /path/to/config.toml`。
     resolved = config_path or env.get("BABYFACE_CONFIG_PATH")
     if resolved is None:
-        default = Path("babyface.toml")
-        if not default.exists():
+        for candidate in _default_config_candidates(env):
+            if candidate.exists():
+                resolved = candidate
+                break
+        if resolved is None:
             return {}
-        resolved = default
 
     path = Path(resolved)
     if not path.exists():
@@ -122,6 +128,20 @@ def _load_config_file(
 
     with path.open("rb") as file:
         return tomllib.load(file)
+
+
+def _default_config_candidates(env: Mapping[str, str]) -> list[Path]:
+    """返回没有显式指定配置文件时要尝试读取的默认路径。
+
+    `babyface.toml` 适合项目内开发；`~/.babyface/config.toml` 适合日常命令行使用。
+    测试传入 `env={}` 时不会误读真实用户目录，避免本机私密配置影响单元测试。
+    """
+
+    candidates = [Path("babyface.toml")]
+    home = env.get("HOME")
+    if home:
+        candidates.append(Path(home) / ".babyface" / "config.toml")
+    return candidates
 
 
 def _get_value(

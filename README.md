@@ -67,6 +67,14 @@ memory_db_path = ".babyface/memory.sqlite3"
 shell_timeout_seconds = 10
 ```
 
+日常命令行使用时，也可以把配置放在用户目录：
+
+```text
+~/.babyface/config.toml
+```
+
+没有显式传入 `--config`、也没有设置 `BABYFACE_CONFIG_PATH` 时，Babyface 会先尝试读取当前目录的 `babyface.toml`，再尝试读取用户目录的 `~/.babyface/config.toml`。
+
 本地验证时也可以使用不会提交到 Git 的私密配置文件：
 
 ```bash
