@@ -9,14 +9,14 @@
 - 新增三个内置本地 Tool，并在 CLI 启动时默认注册。
 - 让每个 Tool 都能被单元测试独立覆盖，不依赖真实 LLM。
 - Shell Tool 增加安全只读命令自动放行逻辑，同时保留风险命令确认。
-- HTTP Request Tool 优先使用 Python 标准库完成请求和解析，减少依赖面。
+- HTTP Request Tool 优先使用 Python 标准库完成普通响应和 SSE 响应解析，减少依赖面。
 
 **Non-Goals:**
 
 - 不实现跨平台打开 App；非 macOS 明确返回不支持。
 - 不把 Web Tool 占位替换成搜索能力。
 - 不引入浏览器控制、后台调度、MCP 服务端或 HTTP API 服务端。
-- 不支持复杂 HTTP 会话、Cookie 持久化、重试队列或流式下载。
+- 不支持复杂 HTTP 会话、Cookie 持久化、重试队列、无限 SSE 监听或大文件流式下载。
 
 ## Decisions
 
@@ -26,21 +26,25 @@
 
 备选方案是把多个小工具合并到一个 `system_tool.py` 中，通过 action 参数分派。该方案文件数更少，但 schema 更粗，模型更难选择正确工具，测试也更容易耦合；本次选择独立工具。
 
-### 2. 操作系统配置读取只返回低敏摘要
+### 2. 操作系统配置读取只返回基础系统摘要
 
-OS Config Tool 返回平台、版本、架构、主机名、用户目录、当前目录、Shell、语言区域等基础信息。环境变量只允许返回白名单项，或者返回敏感变量已隐藏的摘要；任何名称包含 `KEY`、`TOKEN`、`SECRET`、`PASSWORD`、`CREDENTIAL` 的变量值都不得进入结果。
+OS Config Tool 返回平台、版本、架构、主机名、用户目录、语言区域、是否 macOS 等基础信息。它不读取当前工作目录、默认 Shell，也不读取或摘要任何环境变量。这样可以从源头减少误把会话上下文、终端偏好或凭证线索交给 LLM 的风险。
 
-备选方案是返回完整 `os.environ` 后让模型自行判断，但这会把敏感信息暴露给 LLM，不符合本地优先的安全边界。
+备选方案是读取环境变量后再脱敏，或返回当前工作目录和 Shell 帮助模型理解运行环境。该方案信息更全，但隐私和误暴露风险更高；本次按用户要求选择源头不采集。
 
-### 3. macOS 打开 App 使用系统 `open -a`
+### 3. macOS 打开 App 使用直接打开加候选匹配
 
-App Open Tool 在 macOS 上使用系统命令打开 App，并捕获 exit code、stdout、stderr。工具参数只接收 App 名称，不暴露任意 shell 命令字符串，从接口层减少注入风险。非 macOS 直接返回不支持。
+App Open Tool 在 macOS 上先使用系统能力尝试按输入名称打开 App，并捕获 exit code、stdout、stderr。如果直接打开失败，工具扫描 `/Applications`、`/System/Applications` 和 `~/Applications` 等常见目录中的 `.app` 包，提取 App 显示名后用标准库相似度算法匹配用户描述。只有最高分候选达到阈值时，才请求系统打开该候选；否则返回“没有找到足够接近的应用”的结构化错误。
+
+工具参数只接收 App 名称或描述，不暴露任意 shell 命令字符串，从接口层减少注入风险。metadata 记录原始输入、直接打开或模糊匹配的路径、匹配分数和最终候选，便于用户理解为什么打开了某个 App。非 macOS 直接返回不支持。
 
 备选方案是复用 Shell Tool 执行 `open -a`，但这会让 App 打开能力混入 Shell 确认策略，也让 LLM 更容易生成任意命令；独立 Tool 的用户意图和安全边界更清楚。
 
-### 4. HTTP Request Tool 使用标准库并限制协议
+### 4. HTTP Request Tool 使用标准库并区分普通响应与 SSE 响应
 
-HTTP Request Tool 使用 `urllib.request` 发送请求，只允许 `http` 和 `https`。请求参数支持 method、url、headers、body、timeout_seconds。响应体按字节读取后尝试 UTF-8 解码和 JSON 解析；JSON 成功时返回格式化 JSON，失败时返回文本摘要。响应内容需要设置最大字符数，避免把超大响应塞进 LLM 上下文。
+HTTP Request Tool 使用 `urllib.request` 发送请求，只允许 `http` 和 `https`。请求参数支持 method、url、headers、body、timeout_seconds。普通响应按字节读取后尝试 UTF-8 解码和 JSON 解析；JSON 成功时返回格式化 JSON，失败时返回文本摘要。响应内容需要设置最大字符数，避免把超大响应塞进 LLM 上下文。
+
+当响应 `Content-Type` 是 `text/event-stream` 时，工具进入 SSE 解析模式：按行读取 `event:`、`data:`、`id:`、`retry:` 字段，用空行作为一个事件的结束，收集有限数量事件后返回摘要。SSE 读取必须有最大事件数和超时边界；达到事件上限、超时或连接中断时，返回已收集事件，并在 metadata 中记录停止原因。V1 不把 SSE 实时流式转发给用户，只提供有限采样后的结构化结果。
 
 备选方案是引入 `requests` 或 `httpx`。它们更易用，但本项目目前依赖面较小，本次能力用标准库足够。
 
@@ -63,14 +67,15 @@ LangGraph Agent Loop 不需要新增节点；工具 schema 会随 `ToolRegistry.
 - [Risk] Shell 安全分类过宽会带来误操作风险。→ Mitigation：使用 allowlist 优先，未知命令默认走确认；测试覆盖典型安全和风险命令。
 - [Risk] Shell 安全分类过窄会让部分只读命令仍需确认。→ Mitigation：先覆盖项目开发常用只读命令，后续按实际使用逐步扩展 allowlist。
 - [Risk] HTTP Tool 可能读取到过大的响应。→ Mitigation：限制返回内容长度，并在 metadata 中记录是否截断。
+- [Risk] SSE 长连接可能让工具长时间挂起。→ Mitigation：设置最大事件数、最大读取时长和 timeout，返回有限事件摘要而不是无限监听。
 - [Risk] HTTP Tool 访问内网或本机地址可能产生安全争议。→ Mitigation：本次保持为用户本机主动请求能力，不持久化凭证；未来如需要可增加 host denylist 或确认策略。
-- [Risk] macOS App 名称可能不存在或系统返回错误。→ Mitigation：捕获 exit code 与 stderr，返回结构化失败，不让 Session 崩溃。
+- [Risk] App 模糊匹配可能选错应用。→ Mitigation：设置匹配阈值，低于阈值时不打开任何 App，并在 metadata 中记录候选和分数。
 
 ## Migration Plan
 
-1. 新增工具类和 Shell 安全分类器。
+1. 新增工具类、App 候选匹配逻辑、SSE 解析逻辑和 Shell 安全分类器。
 2. 在 CLI 内置工具列表注册新工具。
-3. 更新单元测试覆盖新工具和 Shell 确认策略。
+3. 更新单元测试覆盖新工具、App 模糊匹配、HTTP SSE 和 Shell 确认策略。
 4. 运行工具层与 Runtime 相关测试确认现有行为不回退。
 
 回滚时可移除新工具注册并恢复 Shell Tool 始终确认的行为；由于不涉及数据迁移，回滚不需要处理 SQLite。

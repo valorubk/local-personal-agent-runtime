@@ -1,15 +1,15 @@
 ## ADDED Requirements
 
 ### Requirement: 支持读取操作系统配置 Tool
-系统 SHALL 提供本地操作系统配置读取 Tool，用于返回非敏感的系统与运行环境摘要，帮助 Agent 回答与当前设备、系统、目录或基础环境相关的问题。
+系统 SHALL 提供本地操作系统配置读取 Tool，用于返回非敏感的系统与运行环境摘要，帮助 Agent 回答与当前设备和系统基础配置相关的问题。
 
 #### Scenario: 读取基础系统配置
 - **WHEN** Agent 调用操作系统配置读取 Tool
-- **THEN** Tool 返回操作系统名称、系统版本、CPU 架构、用户目录、当前工作目录、默认 Shell、语言区域和是否为 macOS 的结构化文本摘要
+- **THEN** Tool 返回操作系统名称、系统版本、CPU 架构、用户目录、主机名、语言区域和是否为 macOS 的结构化文本摘要
 
-#### Scenario: 环境变量摘要不得泄露敏感值
-- **WHEN** 操作系统配置读取 Tool 返回环境变量相关信息
-- **THEN** Tool 仅返回允许公开的非敏感变量或脱敏摘要，不得返回 API key、token、password、secret 等敏感变量值
+#### Scenario: 不读取目录 Shell 和环境变量
+- **WHEN** Agent 调用操作系统配置读取 Tool
+- **THEN** Tool 不得返回当前工作目录、默认 Shell 或任何环境变量相关信息
 
 #### Scenario: 操作系统配置读取失败
 - **WHEN** Tool 无法读取某项操作系统配置
@@ -18,9 +18,17 @@
 ### Requirement: 支持打开操作系统 App Tool
 系统 SHALL 提供打开操作系统 App 的本地 Tool，允许 Agent 根据用户意图请求系统打开本机应用；V1 仅支持 macOS。
 
-#### Scenario: 在 macOS 打开 App
+#### Scenario: 在 macOS 直接打开命中的 App
 - **WHEN** Agent 调用打开 App Tool 并提供 App 名称，且当前系统是 macOS
 - **THEN** Tool 请求系统打开对应 App，并返回包含 App 名称和执行状态的结构化结果
+
+#### Scenario: 按描述打开最接近的 App
+- **WHEN** Agent 调用打开 App Tool 并提供 App 描述，且该输入无法直接打开任何 App
+- **THEN** Tool 枚举当前系统已安装 App，选择与用户描述最接近且达到匹配阈值的 App，并请求系统打开该 App
+
+#### Scenario: 没有足够接近的 App 候选
+- **WHEN** Agent 调用打开 App Tool 并提供 App 描述，但已安装 App 中没有达到匹配阈值的候选
+- **THEN** Tool 不打开任何 App，并返回结构化错误说明没有找到足够接近的应用
 
 #### Scenario: 非 macOS 系统拒绝打开 App
 - **WHEN** Agent 调用打开 App Tool，且当前系统不是 macOS
@@ -48,6 +56,14 @@
 #### Scenario: 返回文本响应
 - **WHEN** HTTP 响应体不是合法 JSON 但可作为文本读取
 - **THEN** Tool 返回文本内容摘要，并在 metadata 中标明响应类型为文本
+
+#### Scenario: 解析 SSE 响应
+- **WHEN** HTTP 响应 Content-Type 是 `text/event-stream`
+- **THEN** Tool 按 SSE 格式读取有限数量的事件，返回事件摘要，并在 metadata 中标明响应类型为 SSE
+
+#### Scenario: SSE 响应达到事件或时间限制
+- **WHEN** HTTP Request Tool 读取 SSE 响应达到最大事件数、最大读取时长或连接中断
+- **THEN** Tool 返回已经收集到的事件摘要，并在 metadata 中标明停止原因
 
 #### Scenario: URL 协议不受支持
 - **WHEN** Agent 调用 HTTP Request Tool 并提供非 HTTP/HTTPS URL
