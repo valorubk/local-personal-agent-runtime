@@ -23,12 +23,28 @@
 - **WHEN** 用户提供的 MCP YAML 配置无法解析或缺少必要字段
 - **THEN** 系统拒绝启动外部 MCP Server，并展示中文友好错误说明
 
+#### Scenario: 配置 stdio MCP Server
+- **WHEN** 用户在 MCP YAML 配置中声明 `transport: stdio`，并提供启动命令和参数
+- **THEN** 系统将该配置识别为本地 stdio MCP Server
+
+#### Scenario: 配置 Streamable HTTP MCP Server
+- **WHEN** 用户在 MCP YAML 配置中声明 `transport: streamable_http`，并提供 HTTP URL
+- **THEN** 系统将该配置识别为 MCP over HTTP Server，而不是通用 HTTP Tool
+
 ### Requirement: 管理外部 MCP Server 生命周期
 系统 SHALL 在 Babyface Session 生命周期内启动、使用并关闭已启用的外部 MCP Server，且单个 Server 异常不应导致整个 Session 崩溃。
 
-#### Scenario: 启动已启用的 MCP Server
+#### Scenario: 启动已启用的 stdio MCP Server
 - **WHEN** MCP YAML 配置中存在启用状态的 stdio MCP Server
 - **THEN** 系统按配置启动该 Server，并发现其可用 Tool
+
+#### Scenario: 连接已启用的 Streamable HTTP MCP Server
+- **WHEN** MCP YAML 配置中存在启用状态的 Streamable HTTP MCP Server
+- **THEN** 系统按配置连接该 Server，并发现其可用 Tool
+
+#### Scenario: Streamable HTTP MCP Server 使用请求头
+- **WHEN** MCP YAML 配置为 Streamable HTTP MCP Server 声明请求头或鉴权 token
+- **THEN** 系统在连接和调用该 MCP Server 时带上对应请求头
 
 #### Scenario: 忽略禁用的 MCP Server
 - **WHEN** MCP YAML 配置中存在 `enabled: false` 的 MCP Server
@@ -38,9 +54,13 @@
 - **WHEN** 某个已启用的 MCP Server 启动失败
 - **THEN** 系统展示该 Server 的中文友好失败信息，并继续使用其他可用 Tool 运行 Session
 
+#### Scenario: Streamable HTTP MCP Server 连接失败
+- **WHEN** 某个已启用的 Streamable HTTP MCP Server 无法连接、返回非成功 HTTP 状态或握手超时
+- **THEN** 系统展示该 Server 的中文友好失败信息，并继续使用其他可用 Tool 运行 Session
+
 #### Scenario: Session 退出时关闭 MCP Server
 - **WHEN** 用户输入 `exit`、`quit` 或 `/exit` 退出 Session
-- **THEN** 系统关闭本次 Session 启动的 MCP Server 连接和子进程
+- **THEN** 系统关闭本次 Session 打开的 MCP Server 连接和本地子进程
 
 ### Requirement: 将外部 MCP Tool 暴露给 Agent 调用
 系统 SHALL 将已发现的外部 MCP Tool 注册到 Agent 可用 Tool 列表中，使 LLM 可以按需选择调用。
@@ -55,6 +75,10 @@
 
 #### Scenario: 外部 MCP Tool 调用失败
 - **WHEN** 外部 MCP Tool 返回错误或调用超时
+- **THEN** Session 不崩溃，Agent 基于结构化错误信息继续生成可理解的最终回答
+
+#### Scenario: Streamable HTTP MCP Tool 调用失败
+- **WHEN** Streamable HTTP MCP Tool 调用返回 HTTP 错误、协议错误或超时
 - **THEN** Session 不崩溃，Agent 基于结构化错误信息继续生成可理解的最终回答
 
 #### Scenario: 外部 MCP Tool 与内置 Tool 名称冲突
