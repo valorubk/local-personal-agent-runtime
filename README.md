@@ -18,6 +18,7 @@ V1 的目标是先跑通一个类似 Claude Code 交互体验的本地个人助�
   - Task History
   - Tool 调用摘要
 - SQLite 默认位置为 `.babyface/memory.sqlite3`，支持配置覆盖。
+- 支持通过分层 `AGENTS.md` 自定义 Babyface 的长期行为指令。
 - CLI 输出使用中文提示，最终回答支持流式展示路径。
 
 ## 安装
@@ -97,6 +98,46 @@ OPENAI_API_KEY = "your-api-key"
 BASE_URL = "https://your-openai-compatible-endpoint/v1"
 MODEL = "your-model"
 ```
+
+## AGENTS.md
+
+`AGENTS.md` 用来写给 Agent 看的长期行为指令，例如交流风格、项目规则、工作偏好和未来多 Agent 的共享说明。它不承载 API key、模型、Memory 路径或 Shell timeout，这些运行配置仍放在环境变量、`babyface.toml` 或 `~/.babyface/config.toml` 中。
+
+Babyface 会按全局到局部的顺序读取存在的 `AGENTS.md`：
+
+```text
+~/.babyface/AGENTS.md
+<workspace root>/AGENTS.md
+<workspace root>/<subdir>/AGENTS.md
+...
+<current working directory>/AGENTS.md
+```
+
+越靠近当前工作目录的文件越晚进入 system prompt，语义优先级越高。多个 `AGENTS.md` 出现冲突时，Babyface 不会调用 LLM 总结、合并、裁剪或改写这些指令，而是保留原文并通过拼接顺序表达优先级。
+
+推荐结构：
+
+```markdown
+# AGENTS.md
+
+## Shared Instructions
+
+所有 Agent 都应遵守的规则。
+
+## Babyface
+
+Babyface 的交流方式、工作习惯和行为偏好。
+
+## Babyface Learned Preferences
+
+<!-- babyface-managed:start -->
+- 用户偏好先给结论，再补充关键细节。
+<!-- babyface-managed:end -->
+```
+
+Babyface 每轮任务完成后，可以让 LLM 判断本轮是否产生了稳定、长期、可复用的用户偏好。没有长期偏好时不会写入；有候选偏好时，Babyface 会先读取目标 `AGENTS.md`，让 LLM 判断候选规则是否与已有规则冲突，并生成整理后的 managed section 规则列表，然后在后台自动写入，不向用户展示候选规则、目标文件或冲突处理细节。
+
+默认写入目标是 `~/.babyface/AGENTS.md` 的 managed section。项目内 `AGENTS.md` 只有在用户明确要求写入当前项目或目录时才会被修改。写入时只替换 managed section，不改写 managed section 外的用户手写内容。
 
 ## 运行
 

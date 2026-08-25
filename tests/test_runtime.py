@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from personal_agent.agent.llm import LLMResponse, ToolCall
-from personal_agent.agent.runtime import AgentRuntime
+from personal_agent.agent.runtime import AgentsUpdateProposal, AgentRuntime
 from personal_agent.config import Settings
 from personal_agent.memory.store import MemoryStore
 from personal_agent.tools.base import ToolResult
@@ -194,6 +194,275 @@ class AgentRuntimeTests(unittest.TestCase):
             self.assertEqual(result.final_response, "输入已经可以被模型处理。")
             self.assertEqual(llm.messages_seen[0][-1]["content"], "这个输入里有坏字符：�")
             self.assertEqual(store.list_task_history()[0].user_input, "这个输入里有坏字符：�")
+
+    def test_runtime_uses_builtin_prompt_when_agents_md_is_missing(self) -> None:
+        """防止新增 AGENTS.md 支持后，没有配置文件的默认启动路径被破坏。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = MemoryStore(root / "memory.sqlite3")
+            llm = FakeLLMClient([LLMResponse(content="你好，我在。")])
+            runtime = AgentRuntime(
+                settings=self.make_settings(root / "memory.sqlite3"),
+                memory=store,
+                tools=ToolRegistry([]),
+                llm=llm,
+                agents_home=root / "home",
+                current_dir=root / "repo",
+                workspace_root=root / "repo",
+            )
+
+            runtime.run_turn("你好")
+
+            first_message = llm.messages_seen[0][0]
+            self.assertEqual(first_message["role"], "system")
+            self.assertIn("你是 Babyface", first_message["content"])
+            self.assertNotIn("Source:", first_message["content"])
+
+    def test_runtime_includes_agents_md_original_text_in_first_system_message(self) -> None:
+        """防止 Runtime 把 AGENTS.md 总结、吞掉或放到错误的 message 里。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            repo = root / "repo"
+            current = repo / "app"
+            (home / ".babyface").mkdir(parents=True)
+            current.mkdir(parents=True)
+            (home / ".babyface" / "AGENTS.md").write_text("回答必须简短。", encoding="utf-8")
+            (current / "AGENTS.md").write_text("回答必须详细解释。", encoding="utf-8")
+            store = MemoryStore(root / "memory.sqlite3")
+            llm = FakeLLMClient([LLMResponse(content="收到。")])
+            runtime = AgentRuntime(
+                settings=self.make_settings(root / "memory.sqlite3"),
+                memory=store,
+                tools=ToolRegistry([]),
+                llm=llm,
+                agents_home=home,
+                current_dir=current,
+                workspace_root=repo,
+            )
+
+            runtime.run_turn("你好")
+
+            first_prompt = llm.messages_seen[0][0]["content"]
+            memory_prompt = llm.messages_seen[0][1]["content"]
+            self.assertIn("你是 Babyface", first_prompt)
+            self.assertIn("后出现", first_prompt)
+            self.assertIn("不得删除、改写或总结任何 AGENTS.md 内容", first_prompt)
+            self.assertIn("回答必须简短。", first_prompt)
+            self.assertIn("回答必须详细解释。", first_prompt)
+            self.assertLess(first_prompt.index("回答必须简短。"), first_prompt.index("回答必须详细解释。"))
+            self.assertIn("Source:", first_prompt)
+            self.assertIn("当前 Memory 上下文", memory_prompt)
+            self.assertNotIn("回答必须简短。", memory_prompt)
+
+    def test_runtime_skips_agents_update_when_llm_says_no_update(self) -> None:
+        """防止每轮任务都无脑写入 AGENTS.md，污染长期 system prompt。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            llm = FakeLLMClient(
+                [
+                    LLMResponse(content="收到。"),
+                    LLMResponse(content='{"should_update": false}'),
+                ]
+            )
+            runtime = AgentRuntime(
+                settings=self.make_settings(root / "memory.sqlite3"),
+                memory=MemoryStore(root / "memory.sqlite3"),
+                tools=ToolRegistry([]),
+                llm=llm,
+                agents_home=root / "home",
+                current_dir=root / "repo",
+                workspace_root=root / "repo",
+                enable_agents_update=True,
+            )
+
+            runtime.run_turn("帮我计算 1+1")
+
+            self.assertFalse((root / "home" / ".babyface" / "AGENTS.md").exists())
+
+    def test_runtime_writes_agents_update_to_global_agents_md_without_user_confirmation(self) -> None:
+        """防止长期偏好写入流程暴露额外确认细节给用户。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            llm = FakeLLMClient(
+                [
+                    LLMResponse(content="以后我会先给结论。"),
+                    LLMResponse(
+                        content=json.dumps(
+                            {
+                                "should_update": True,
+                                "target": "global",
+                                "preference": "用户偏好先给结论，再补充关键细节。",
+                                "reason": "用户表达了长期交流偏好。",
+                            },
+                            ensure_ascii=False,
+                        )
+                    ),
+                    LLMResponse(
+                        content=json.dumps(
+                            {
+                                "managed_preferences": [
+                                    "用户偏好先给结论，再补充关键细节。",
+                                ]
+                            },
+                            ensure_ascii=False,
+                        )
+                    ),
+                ]
+            )
+            runtime = AgentRuntime(
+                settings=self.make_settings(root / "memory.sqlite3"),
+                memory=MemoryStore(root / "memory.sqlite3"),
+                tools=ToolRegistry([]),
+                llm=llm,
+                agents_home=root / "home",
+                current_dir=root / "repo",
+                workspace_root=root / "repo",
+                enable_agents_update=True,
+            )
+
+            runtime.run_turn("以后回答请先给结论")
+
+            agents_path = root / "home" / ".babyface" / "AGENTS.md"
+            content = agents_path.read_text(encoding="utf-8")
+        self.assertIn("- 用户偏好先给结论，再补充关键细节。", content)
+
+    def test_runtime_uses_llm_resolved_managed_preferences_before_writing_conflict(self) -> None:
+        """防止冲突时只机械追加新规则，导致 managed section 中留下互相矛盾的规则。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            agents_path = root / "home" / ".babyface" / "AGENTS.md"
+            agents_path.parent.mkdir(parents=True)
+            agents_path.write_text(
+                "\n".join(
+                    [
+                        "# AGENTS.md",
+                        "",
+                        "## Babyface Learned Preferences",
+                        "",
+                        "<!-- babyface-managed:start -->",
+                        "- 用户偏好回答必须简短。",
+                        "<!-- babyface-managed:end -->",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            llm = FakeLLMClient(
+                [
+                    LLMResponse(content="以后我会详细解释。"),
+                    LLMResponse(
+                        content=json.dumps(
+                            {
+                                "should_update": True,
+                                "target": "global",
+                                "preference": "用户偏好回答必须详细解释。",
+                                "reason": "用户表达了新的长期交流偏好。",
+                            },
+                            ensure_ascii=False,
+                        )
+                    ),
+                    LLMResponse(
+                        content=json.dumps(
+                            {
+                                "managed_preferences": [
+                                    "用户偏好回答必须详细解释。",
+                                ],
+                                "conflict_resolution": "新规则替换旧的简短回答偏好。",
+                            },
+                            ensure_ascii=False,
+                        )
+                    ),
+                ]
+            )
+            runtime = AgentRuntime(
+                settings=self.make_settings(root / "memory.sqlite3"),
+                memory=MemoryStore(root / "memory.sqlite3"),
+                tools=ToolRegistry([]),
+                llm=llm,
+                agents_home=root / "home",
+                current_dir=root / "repo",
+                workspace_root=root / "repo",
+                enable_agents_update=True,
+            )
+
+            runtime.run_turn("以后回答要详细解释")
+
+            content = agents_path.read_text(encoding="utf-8")
+        self.assertNotIn("用户偏好回答必须简短。", content)
+        self.assertIn("- 用户偏好回答必须详细解释。", content)
+
+    def test_runtime_retries_agents_update_extraction_for_explicit_preference_request(self) -> None:
+        """防止用户明确要求更新长期回复规则时，被第一轮保守判断静默吞掉。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            agents_path = root / "home" / ".babyface" / "AGENTS.md"
+            agents_path.parent.mkdir(parents=True)
+            agents_path.write_text(
+                "\n".join(
+                    [
+                        "# AGENTS.md",
+                        "",
+                        "## Babyface Learned Preferences",
+                        "",
+                        "<!-- babyface-managed:start -->",
+                        "- 回复用户时需以“Ciallo～”开头，作为固定开场问候语",
+                        "<!-- babyface-managed:end -->",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            llm = FakeLLMClient(
+                [
+                    LLMResponse(content="Ciallo～ 我已经记住了，以后每次回复你都会先说“okeydoky～”。"),
+                    LLMResponse(content='{"should_update": false}'),
+                    LLMResponse(
+                        content=json.dumps(
+                            {
+                                "should_update": True,
+                                "target": "global",
+                                "preference": "回复用户时需以“okeydoky～”开头，作为固定开场问候语",
+                                "reason": "用户明确要求替换固定回复开场白。",
+                            },
+                            ensure_ascii=False,
+                        )
+                    ),
+                    LLMResponse(
+                        content=json.dumps(
+                            {
+                                "managed_preferences": [
+                                    "回复用户时需以“okeydoky～”开头，作为固定开场问候语",
+                                ],
+                                "conflict_resolution": "新开场白替换旧的 Ciallo 开场白。",
+                            },
+                            ensure_ascii=False,
+                        )
+                    ),
+                ]
+            )
+            runtime = AgentRuntime(
+                settings=self.make_settings(root / "memory.sqlite3"),
+                memory=MemoryStore(root / "memory.sqlite3"),
+                tools=ToolRegistry([]),
+                llm=llm,
+                agents_home=root / "home",
+                current_dir=root / "repo",
+                workspace_root=root / "repo",
+                enable_agents_update=True,
+            )
+
+            runtime.run_turn("记住在跟我回复的时候一定要先说这么一句话“OkeyDoky～”")
+
+            content = agents_path.read_text(encoding="utf-8")
+            extraction_messages = llm.messages_seen[2]
+        self.assertIn("当前已加载的 AGENTS.md", extraction_messages[1]["content"])
+        self.assertNotIn("Ciallo", content)
+        self.assertIn("okeydoky", content.lower())
 
 
 if __name__ == "__main__":
