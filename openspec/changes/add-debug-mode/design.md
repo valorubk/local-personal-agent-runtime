@@ -98,7 +98,15 @@ Debug recorder 只负责把事件写入 Debug Store，不接受 CLI 输出回调
 
 `stage` 保存 `user_input_received`、`llm_before`、`llm_after`、`tool_before`、`tool_after`、`skill_before`、`skill_after` 等阶段名称。`metadata` 使用 JSON 字符串保存模型名、tool_call_id、错误类型、节点名等结构化补充字段。使用单表可以减少 V1 schema 复杂度；如果后续需要查询优化，再按事件类型拆表或加索引。
 
-### 9. Shell 二次确认和流式输出保持现有体验
+### 9. Memory 历史表也保存关联 ID
+
+为了让 `.babyface/memory.sqlite3` 中的 Task History 和 Tool 调用摘要能与 debug trace 互相关联，`MemoryStore` 的 `task_history` 和 `tool_calls` 表也保存 `session_id` 和 `trace_id`。
+
+现有数据库需要兼容升级：`MemoryStore._initialize()` 在创建表后检查表字段，缺少 `session_id` 或 `trace_id` 时通过 `ALTER TABLE` 增加可空文本列。旧记录没有这些 ID 时保持 `NULL`，新记录在 Runtime 调用 `save_task_history()` 时写入当前轮的 `session_id` 和 `trace_id`。
+
+`tool_calls` 表也保存同一组 ID，虽然可以通过 `task_id` 关联回 `task_history`，但冗余字段能让用户直接查询工具调用记录时不用每次 join。
+
+### 10. Shell 二次确认和流式输出保持现有体验
 
 Shell Tool 的二次确认仍由 CLI 注入的 `confirm_shell()` 负责。调试模式只记录确认结果和 Tool 输出，不绕过用户确认，也不在确认前执行命令。
 

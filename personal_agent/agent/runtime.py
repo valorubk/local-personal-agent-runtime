@@ -210,6 +210,8 @@ class AgentRuntime:
             user_input=safe_user_input,
             final_response=final_response,
             tool_calls=[tool.as_history_item() for tool in tool_results],
+            session_id=self.debug_recorder.session_id or None,
+            trace_id=trace_id,
         )
 
         # 一轮完成后，把“用户问题 + Agent 最终回答”加入短期记忆。

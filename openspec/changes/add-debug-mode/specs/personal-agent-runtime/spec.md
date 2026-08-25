@@ -44,6 +44,15 @@
 - **THEN** 系统为两轮对话生成不同的 `trace_id`
 - **AND** 两轮对话共享同一个 `session_id`
 
+#### Scenario: Task History 保存 Session 和 Trace ID
+- **WHEN** 一轮用户请求完成并写入 Task History
+- **THEN** `task_history` 记录保存该轮的 `session_id` 和 `trace_id`
+
+#### Scenario: Tool 调用摘要保存 Session 和 Trace ID
+- **WHEN** 一轮用户请求发生 Tool 调用并写入 Tool 调用摘要
+- **THEN** `tool_calls` 记录保存该轮的 `session_id` 和 `trace_id`
+- **AND** Tool 调用摘要中的 `session_id` 和 `trace_id` 与所属 Task History 记录一致
+
 ### Requirement: 通过切面式记录保持调试架构整洁
 系统 SHALL 通过统一的调试记录边界采集调用链路信息，避免在 CLI、LLM、Tool 和 Skill 业务逻辑中重复实现 SQLite 持久化逻辑。
 

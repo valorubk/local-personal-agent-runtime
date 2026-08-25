@@ -240,6 +240,53 @@ class AgentRuntimeTests(unittest.TestCase):
         ]:
             self.assertIn(stage, stages)
 
+    def test_task_history_and_tool_calls_share_debug_trace_ids(self) -> None:
+        """防止 Memory 历史无法和 debug trace 按 session_id/trace_id 关联。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = MemoryStore(root / "memory.sqlite3")
+            llm = FakeLLMClient(
+                [
+                    LLMResponse(
+                        content="",
+                        tool_calls=[
+                            ToolCall(
+                                id="call-1",
+                                name="echo",
+                                arguments={"text": "工具结果"},
+                            )
+                        ],
+                    ),
+                    LLMResponse(content="最终：工具结果"),
+                ]
+            )
+            runtime = AgentRuntime(
+                settings=self.make_settings(root / "memory.sqlite3"),
+                memory=store,
+                tools=ToolRegistry([EchoTool()]),
+                llm=llm,
+                debug_recorder=DebugTraceRecorder(
+                    session_id="session-fixed",
+                    store=DebugTraceStore(root),
+                    now=lambda: datetime(2026, 8, 25, 19, 6, 1),
+                ),
+            )
+
+            runtime.run_turn("调用工具")
+
+            history = store.list_task_history()[0]
+            debug_db_path = root / ".babyface" / "debug" / "debug_trace_20260825"
+            with closing(sqlite3.connect(debug_db_path)) as conn:
+                debug_ids = conn.execute(
+                    "SELECT DISTINCT session_id, trace_id FROM debug_trace_events"
+                ).fetchall()
+
+        self.assertEqual(history.session_id, "session-fixed")
+        self.assertEqual(history.tool_calls[0]["session_id"], history.session_id)
+        self.assertEqual(history.tool_calls[0]["trace_id"], history.trace_id)
+        self.assertEqual(debug_ids, [(history.session_id, history.trace_id)])
+
     def test_runtime_includes_previous_turns_in_next_llm_call(self) -> None:
         """防止短期记忆断掉。
 

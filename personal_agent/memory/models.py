@@ -17,4 +17,6 @@ class TaskHistory:
     user_input: str
     final_response: str
     created_at: datetime
+    session_id: str | None = None
+    trace_id: str | None = None
     tool_calls: list[dict[str, Any]] = field(default_factory=list)

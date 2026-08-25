@@ -42,3 +42,5 @@
 - [x] 5.6 补充 README 或配置说明，提示调试模式会记录内部输入输出，并说明本地 SQLite 文件位置。
 - [x] 5.7 运行完整测试套件，并记录验证命令和结果。
 - [x] 5.8 补充 Banner 测试，验证 Debug 模式展示 `Debug mode`，普通模式不展示。
+- [x] 5.9 更新 MemoryStore，使 `task_history` 和 `tool_calls` 保存 `session_id`、`trace_id`，并兼容已有 SQLite 表结构。
+- [x] 5.10 补充 Memory 和 Runtime 测试，验证 Task History、Tool 调用摘要与 debug trace 可通过 `session_id`、`trace_id` 关联。
