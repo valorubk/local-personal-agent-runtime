@@ -1,6 +1,6 @@
 ## 1. 调试数据模型与存储
 
-- [ ] 1.1 新增调试事件数据模型，字段覆盖事件类型、名称、输入、输出、metadata、`Session ID`、`Trace ID` 和系统时间。
+- [ ] 1.1 新增调试事件数据模型，字段覆盖事件类型、阶段名称、名称、输入、输出、metadata、`Session ID`、`Trace ID` 和系统时间。
 - [ ] 1.2 新增本地系统时间格式化工具，输出格式固定为 `YYYY-MM-DD HH:MM:SS`，并补充单元测试。
 - [ ] 1.3 新增按日期生成调试 SQLite 文件路径的函数，默认目录为 `.babyface/debug/`，文件名为 `debug_trace_YYYYMMDD`，并补充单元测试。
 - [ ] 1.4 新增 `DebugTraceStore`，负责创建 `debug_trace_events` 表并写入调试事件。
@@ -10,8 +10,9 @@
 
 - [ ] 2.1 新增 `DebugTraceRecorder`，统一接收调试事件并分发到命令行输出和 SQLite store。
 - [ ] 2.2 新增普通模式下的空调试记录器或禁用路径，确保未开启 `--debug` 时不会输出或写入调试记录。
-- [ ] 2.3 实现调试事件终端格式化，稳定输出事件类型、输入、输出、`Session ID`、`Trace ID` 和系统时间。
-- [ ] 2.4 补充调试记录器在 SQLite 写入失败时输出中文友好提示且不中断调用方的测试。
+- [ ] 2.3 为 recorder 新增类似切面的前后置 helper，覆盖 LLM 调用前后、Tool 调用前后和 Skill 调用前后。
+- [ ] 2.4 实现调试事件终端格式化，稳定输出事件类型、阶段名称、输入、输出、`Session ID`、`Trace ID` 和系统时间。
+- [ ] 2.5 补充调试记录器在 SQLite 写入失败时输出中文友好提示且不中断调用方的测试。
 
 ## 3. CLI Session 接入
 
@@ -23,16 +24,18 @@
 ## 4. Agent Runtime 链路埋点
 
 - [ ] 4.1 在每次 `run_turn()` 开始时生成唯一 `Trace ID`，并确保同一轮调用链路复用该 ID。
-- [ ] 4.2 在用户输入清洗后记录用户信息类型调试事件，并在最终回答生成后记录对应输出。
-- [ ] 4.3 在 LLM 调用前后记录 LLM 信息类型调试事件，包含 messages、tool schema 摘要、模型信息、输出内容和 tool calls。
-- [ ] 4.4 在 Tool 执行前后记录工具调用类型调试事件，包含 Tool 名称、arguments、content、error 和 metadata。
-- [ ] 4.5 在 post-turn Skill 维护服务调用前后记录 Skill 调用类型调试事件，包含 Skill 名称、输入上下文、输出或错误。
-- [ ] 4.6 确认 Shell Tool 二次确认流程不被调试模式绕过，并记录确认后的 Tool 结果。
+- [ ] 4.2 在用户输入清洗后记录 `user_input_received` 阶段的用户信息类型调试事件。
+- [ ] 4.3 使用 recorder 的切面 helper 包裹 LLM 调用，分别记录 `llm_before` 和 `llm_after` 阶段，包含 messages、tool schema 摘要、模型信息、输出内容和 tool calls。
+- [ ] 4.4 使用 recorder 的切面 helper 包裹 Tool 调用，分别记录 `tool_before` 和 `tool_after` 阶段，包含 Tool 名称、arguments、content、error 和 metadata。
+- [ ] 4.5 使用 recorder 的切面 helper 包裹 post-turn Skill 维护服务调用，分别记录 `skill_before` 和 `skill_after` 阶段，包含 Skill 名称、输入上下文、输出或错误。
+- [ ] 4.6 确认 Runtime、LLM、Tool 和 Skill 业务逻辑不直接拼接调试输出文本或直接写入调试 SQLite 表。
+- [ ] 4.7 确认 Shell Tool 二次确认流程不被调试模式绕过，并记录确认后的 Tool 结果。
 
 ## 5. 集成验证与文档
 
 - [ ] 5.1 补充 Runtime 单元测试，验证同一 Session 多轮对话共享 `Session ID` 且每轮 `Trace ID` 不同。
 - [ ] 5.2 补充 CLI 测试，验证 `babyface --debug` 开启调试输出，普通 `babyface` 不输出调试链路。
 - [ ] 5.3 补充 SQLite 集成测试，验证系统日期为 2026 年 8 月 25 日时写入 `debug_trace_20260825`。
-- [ ] 5.4 补充 README 或配置说明，提示调试模式会记录内部输入输出，并说明本地 SQLite 文件位置。
-- [ ] 5.5 运行完整测试套件，并记录验证命令和结果。
+- [ ] 5.4 补充链路阶段测试，验证至少包含 `user_input_received`、`llm_before`、`llm_after`、`tool_before`、`tool_after`、`skill_before` 和 `skill_after`。
+- [ ] 5.5 补充 README 或配置说明，提示调试模式会记录内部输入输出，并说明本地 SQLite 文件位置。
+- [ ] 5.6 运行完整测试套件，并记录验证命令和结果。

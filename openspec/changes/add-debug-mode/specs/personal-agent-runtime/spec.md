@@ -37,30 +37,60 @@
 - **AND** 两轮对话共享同一个 `Session ID`
 
 ### Requirement: 在命令行输出调试链路记录
-系统 SHALL 在调试模式下向命令行打印 Agent 内部调用链路的每个关键节点记录，记录至少包含节点类型、输入、输出、`Session ID`、`Trace ID` 和系统时间。
+系统 SHALL 在调试模式下向命令行打印 Agent 内部调用链路的每个关键阶段记录，记录至少包含节点类型、阶段名称、输入、输出、`Session ID`、`Trace ID` 和系统时间。
 
-#### Scenario: 输出用户输入记录
+#### Scenario: 接受用户输入后输出用户信息记录
 - **WHEN** 调试模式下用户提交一轮输入
 - **THEN** CLI 打印用户信息类型的调试记录
+- **AND** 该记录的阶段名称表示已接受用户输入
 - **AND** 该记录包含用户输入、`Session ID`、`Trace ID` 和格式为 `YYYY-MM-DD HH:MM:SS` 的系统时间
 
-#### Scenario: 输出 LLM 调用记录
-- **WHEN** 调试模式下一轮对话触发 LLM 调用
+#### Scenario: LLM 调用前输出记录
+- **WHEN** 调试模式下一轮对话即将触发 LLM 调用
 - **THEN** CLI 打印 LLM 信息类型的调试记录
-- **AND** 该记录包含 LLM 输入、LLM 输出、模型相关信息、`Session ID`、`Trace ID` 和系统时间
+- **AND** 该记录的阶段名称表示 LLM 调用前
+- **AND** 该记录包含 LLM 输入、模型相关信息、`Session ID`、`Trace ID` 和系统时间
 
-#### Scenario: 输出工具调用记录
-- **WHEN** 调试模式下一轮对话触发 Tool 调用
+#### Scenario: LLM 调用后输出记录
+- **WHEN** 调试模式下一轮对话完成 LLM 调用
+- **THEN** CLI 打印 LLM 信息类型的调试记录
+- **AND** 该记录的阶段名称表示 LLM 调用后
+- **AND** 该记录包含 LLM 输出、模型相关信息、Tool 调用请求摘要、`Session ID`、`Trace ID` 和系统时间
+
+#### Scenario: Tool 调用前输出记录
+- **WHEN** 调试模式下一轮对话即将触发 Tool 调用
 - **THEN** CLI 打印工具调用类型的调试记录
-- **AND** 该记录包含 Tool 名称、Tool 输入、Tool 输出或错误、`Session ID`、`Trace ID` 和系统时间
+- **AND** 该记录的阶段名称表示 Tool 调用前
+- **AND** 该记录包含 Tool 名称、Tool 输入、`Session ID`、`Trace ID` 和系统时间
 
-#### Scenario: 输出 Skill 调用记录
-- **WHEN** 调试模式下一轮对话触发 Skill 调用
+#### Scenario: Tool 调用后输出记录
+- **WHEN** 调试模式下一轮对话完成 Tool 调用
+- **THEN** CLI 打印工具调用类型的调试记录
+- **AND** 该记录的阶段名称表示 Tool 调用后
+- **AND** 该记录包含 Tool 名称、Tool 输出或错误、`Session ID`、`Trace ID` 和系统时间
+
+#### Scenario: Skill 调用前输出记录
+- **WHEN** 调试模式下一轮对话即将触发 Skill 调用
 - **THEN** CLI 打印 Skill 调用类型的调试记录
-- **AND** 该记录包含 Skill 名称、Skill 输入、Skill 输出或错误、`Session ID`、`Trace ID` 和系统时间
+- **AND** 该记录的阶段名称表示 Skill 调用前
+- **AND** 该记录包含 Skill 名称、Skill 输入、`Session ID`、`Trace ID` 和系统时间
+
+#### Scenario: Skill 调用后输出记录
+- **WHEN** 调试模式下一轮对话完成 Skill 调用
+- **THEN** CLI 打印 Skill 调用类型的调试记录
+- **AND** 该记录的阶段名称表示 Skill 调用后
+- **AND** 该记录包含 Skill 名称、Skill 输出或错误、`Session ID`、`Trace ID` 和系统时间
+
+### Requirement: 通过切面式记录保持调试架构整洁
+系统 SHALL 通过统一的调试记录边界采集调用链路信息，避免在 CLI、LLM、Tool 和 Skill 业务逻辑中重复实现命令行输出和 SQLite 持久化逻辑。
+
+#### Scenario: 业务逻辑通过统一调试边界记录事件
+- **WHEN** Agent Runtime、LLM 调用、Tool 调用或 Skill 调用需要产生调试记录
+- **THEN** 系统通过统一调试记录边界提交调试事件
+- **AND** 业务逻辑不直接拼接调试终端文本或直接写入调试 SQLite 表
 
 ### Requirement: 持久化调试链路记录
-系统 SHALL 在调试模式下把 Agent 内部调用链路的每个关键节点记录持久化到本地 SQLite 文件，并按系统日期分隔文件。
+系统 SHALL 在调试模式下把 Agent 内部调用链路的每个关键阶段记录持久化到本地 SQLite 文件，并按系统日期分隔文件。
 
 #### Scenario: 按日期创建调试 SQLite 文件
 - **WHEN** 系统日期为 2026 年 8 月 25 日且用户以调试模式启动 Babyface
