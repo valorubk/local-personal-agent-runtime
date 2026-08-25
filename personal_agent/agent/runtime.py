@@ -469,7 +469,32 @@ class AgentRuntime:
         content = response.content
         if response.tool_calls:
             content = "Tool 调用达到上限，已停止继续执行。"
+        app_open_response = self._successful_app_open_response(state)
+        if app_open_response:
+            content = app_open_response
         return {**state, "final_response": content}
+
+    def _successful_app_open_response(self, state: RuntimeState) -> str | None:
+        """为成功的 App 打开操作生成确定性最终回答。
+
+        打开 App 是一个已经由本地 Tool 完成的动作。如果 Tool 返回成功，
+        Runtime 直接给出短确认，避免 LLM 在终端里继续补充“如果没有打开”
+        这类排查建议，造成用户误以为操作失败。
+        """
+
+        tool_results = list(state.get("tool_results", []))
+        successful_app_calls = [
+            executed
+            for executed in tool_results
+            if executed.name == "app_open" and executed.result.ok
+        ]
+        if not successful_app_calls:
+            return None
+        latest = successful_app_calls[-1]
+        matched_app = str(latest.result.metadata.get("matched_app") or latest.result.metadata.get("app_name") or "")
+        if not matched_app:
+            return "已成功打开 App。"
+        return f"已成功打开{matched_app}。"
 
     def _save_explicit_profile_memory(self, user_input: str) -> None:
         """保存用户明确要求记住的长期信息。

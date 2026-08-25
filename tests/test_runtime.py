@@ -66,6 +66,27 @@ class EchoTool:
         return ToolResult(ok=True, content=arguments["text"], metadata={"source": "fake"})
 
 
+class SuccessfulAppTool:
+    """模拟成功打开 App 的工具。
+
+    这个替身用于验证 Runtime 对 app_open 成功结果的最终回答约束，
+    不需要真的启动 macOS 应用。
+    """
+
+    name = "app_open"
+    description = "打开 App"
+
+    def to_openai_tool(self):
+        return {"type": "function", "function": {"name": self.name}}
+
+    def run(self, arguments):
+        return ToolResult(
+            ok=True,
+            content="已成功打开 App：网易云音乐",
+            metadata={"matched_app": "网易云音乐", "match_method": "fuzzy"},
+        )
+
+
 class RecordingAgentsMdMaintenance:
     """记录 Runtime 是否在一轮结束后调用维护服务。"""
 
@@ -141,6 +162,37 @@ class AgentRuntimeTests(unittest.TestCase):
             self.assertEqual(result.tool_results[0].name, "echo")
             self.assertTrue(result.tool_results[0].result.ok)
             self.assertIn("工具结果", str(llm.messages_seen[-1]))
+
+    def test_runtime_returns_short_confirmation_after_successful_app_open(self) -> None:
+        """防止 App 已成功打开后，最终回答继续输出无谓的排查建议。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MemoryStore(Path(tmp) / "memory.sqlite3")
+            llm = FakeLLMClient(
+                [
+                    LLMResponse(
+                        content="",
+                        tool_calls=[
+                            ToolCall(
+                                id="call-app",
+                                name="app_open",
+                                arguments={"app_name": "网易云音乐"},
+                            )
+                        ],
+                    ),
+                    LLMResponse(content="已打开。如果仍然无法打开，请确认路径和权限。"),
+                ]
+            )
+            runtime = AgentRuntime(
+                settings=self.make_settings(Path(tmp) / "memory.sqlite3"),
+                memory=store,
+                tools=ToolRegistry([SuccessfulAppTool()]),
+                llm=llm,
+            )
+
+            result = runtime.run_turn("打开网易云音乐")
+
+        self.assertEqual(result.final_response, "已成功打开网易云音乐。")
 
     def test_system_prompt_tells_model_to_use_tools_or_ask_for_missing_arguments(self) -> None:
         """防止模型在天气等实时信息场景中不调用工具也不追问必要参数。"""

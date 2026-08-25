@@ -34,9 +34,9 @@ OS Config Tool 返回平台、版本、架构、主机名、用户目录、语�
 
 ### 3. macOS 打开 App 使用直接打开加候选匹配
 
-App Open Tool 在 macOS 上先使用系统能力尝试按输入名称打开 App，并捕获 exit code、stdout、stderr。如果直接打开失败，工具扫描 `/Applications`、`/System/Applications` 和 `~/Applications` 等常见目录中的 `.app` 包，提取 App 显示名后用标准库相似度算法匹配用户描述。只有最高分候选达到阈值时，才请求系统打开该候选；否则返回“没有找到足够接近的应用”的结构化错误。
+App Open Tool 在 macOS 上优先扫描 `/Applications`、`/System/Applications` 和 `~/Applications` 等常见目录中的 `.app` 包，再使用系统能力打开匹配到的 App。扫描时不仅使用 `.app` 目录名，也读取 `InfoPlist.strings` 中的本地化 `CFBundleDisplayName` 和 `CFBundleName`，让“网易云音乐”这类中文描述可以匹配到 `NeteaseMusic.app`。只有最高分候选达到阈值时，才请求系统打开该候选；如果没有候选达到阈值，再尝试按原始输入直接打开，最后仍失败则返回“没有找到足够接近的应用”的结构化错误。
 
-工具参数只接收 App 名称或描述，不暴露任意 shell 命令字符串，从接口层减少注入风险。metadata 记录原始输入、直接打开或模糊匹配的路径、匹配分数和最终候选，便于用户理解为什么打开了某个 App。非 macOS 直接返回不支持。
+工具参数只接收 App 名称或描述，不暴露任意 shell 命令字符串，从接口层减少注入风险。metadata 记录原始输入、直接打开或模糊匹配的路径、匹配别名、匹配分数和最终候选，便于用户理解为什么打开了某个 App。非 macOS 直接返回不支持。Runtime 在 `app_open` 成功后使用确定性的短确认作为最终回复，避免 LLM 在成功场景下继续输出路径、权限或“如果仍然无法打开”的排查建议。
 
 备选方案是复用 Shell Tool 执行 `open -a`，但这会让 App 打开能力混入 Shell 确认策略，也让 LLM 更容易生成任意命令；独立 Tool 的用户意图和安全边界更清楚。
 
@@ -69,7 +69,7 @@ LangGraph Agent Loop 不需要新增节点；工具 schema 会随 `ToolRegistry.
 - [Risk] HTTP Tool 可能读取到过大的响应。→ Mitigation：限制返回内容长度，并在 metadata 中记录是否截断。
 - [Risk] SSE 长连接可能让工具长时间挂起。→ Mitigation：设置最大事件数、最大读取时长和 timeout，返回有限事件摘要而不是无限监听。
 - [Risk] HTTP Tool 访问内网或本机地址可能产生安全争议。→ Mitigation：本次保持为用户本机主动请求能力，不持久化凭证；未来如需要可增加 host denylist 或确认策略。
-- [Risk] App 模糊匹配可能选错应用。→ Mitigation：设置匹配阈值，低于阈值时不打开任何 App，并在 metadata 中记录候选和分数。
+- [Risk] App 模糊匹配可能选错应用。→ Mitigation：设置匹配阈值，优先读取本地化显示名提高匹配质量；低于阈值时不打开任何 App，并在 metadata 中记录候选和分数。
 
 ## Migration Plan
 

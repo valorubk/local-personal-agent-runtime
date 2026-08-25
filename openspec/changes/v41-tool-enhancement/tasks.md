@@ -22,3 +22,11 @@
 - [x] 4.1 运行工具层单元测试，确认新工具和 Shell 安全策略符合规格。
 - [x] 4.2 运行 Runtime 或 CLI 相关测试，确认新增工具注册不破坏现有 Agent Loop。
 - [x] 4.3 运行 OpenSpec 验证，确认本次 change 的规格、设计和任务状态有效。
+
+## 5. App 打开缺陷修复
+
+- [x] 5.1 为 App Open Tool 增加回归测试，覆盖通过本地化显示名把“网易云音乐”匹配到 `NeteaseMusic.app`。
+- [x] 5.2 为 Runtime 增加回归测试，覆盖 `app_open` 成功后最终回复只做简短确认。
+- [x] 5.3 调整 App Open Tool，优先扫描 macOS 应用目录并读取本地化显示名后再执行打开。
+- [x] 5.4 调整 Runtime，让成功的 `app_open` 结果不再触发多余排查建议。
+- [x] 5.5 调整 App Open Tool，使无法解码的 `InfoPlist.strings` 不会中断应用目录扫描。

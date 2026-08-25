@@ -24,11 +24,15 @@
 
 #### Scenario: 按描述打开最接近的 App
 - **WHEN** Agent 调用打开 App Tool 并提供 App 描述，且该输入无法直接打开任何 App
-- **THEN** Tool 枚举当前系统已安装 App，选择与用户描述最接近且达到匹配阈值的 App，并请求系统打开该 App
+- **THEN** Tool 枚举当前系统已安装 App，结合 App 目录名和本地化显示名选择与用户描述最接近且达到匹配阈值的 App，并请求系统打开该 App
 
 #### Scenario: 没有足够接近的 App 候选
 - **WHEN** Agent 调用打开 App Tool 并提供 App 描述，但已安装 App 中没有达到匹配阈值的候选
 - **THEN** Tool 不打开任何 App，并返回结构化错误说明没有找到足够接近的应用
+
+#### Scenario: 成功打开 App 后简短确认
+- **WHEN** App Open Tool 成功打开或请求系统打开目标 App
+- **THEN** Agent 最终回复只确认打开成功，不应继续提示用户检查路径、权限或“如果仍然无法打开”的排查建议
 
 #### Scenario: 非 macOS 系统拒绝打开 App
 - **WHEN** Agent 调用打开 App Tool，且当前系统不是 macOS

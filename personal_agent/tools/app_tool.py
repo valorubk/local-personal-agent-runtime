@@ -49,7 +49,10 @@ class AppOpenTool:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "app_name": {"type": "string", "description": "App 名称或用户描述"}
+                        "app_name": {
+                            "type": "string",
+                            "description": "用户想打开的 App 名称或自然语言描述，工具会扫描 macOS 应用目录并做名称匹配",
+                        }
                     },
                     "required": ["app_name"],
                 },
@@ -70,11 +73,48 @@ class AppOpenTool:
                 metadata={"app_name": app_name, "platform": self.platform_name_provider()},
             )
 
+        match = self._find_best_app_match(app_name)
+        if match is not None:
+            matched_name, matched_path, score, aliases = match
+            exit_code, stdout, stderr = self.opener(matched_name)
+            if exit_code == 0:
+                return ToolResult(
+                    ok=True,
+                    content=f"已成功打开 App：{matched_name}",
+                    metadata={
+                        "app_name": app_name,
+                        "matched_app": matched_name,
+                        "matched_path": str(matched_path),
+                        "matched_aliases": aliases,
+                        "match_score": score,
+                        "match_method": "fuzzy",
+                        "exit_code": exit_code,
+                        "stdout": stdout,
+                        "stderr": stderr,
+                    },
+                )
+
+            return ToolResult(
+                ok=False,
+                error="打开 App 失败。",
+                metadata={
+                    "app_name": app_name,
+                    "matched_app": matched_name,
+                    "matched_path": str(matched_path),
+                    "matched_aliases": aliases,
+                    "match_score": score,
+                    "match_method": "fuzzy",
+                    "exit_code": exit_code,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                },
+            )
+
         exit_code, stdout, stderr = self.opener(app_name)
         if exit_code == 0:
             return ToolResult(
                 ok=True,
-                content=f"已请求系统打开 App：{app_name}",
+                content=f"已成功打开 App：{app_name}",
                 metadata={
                     "app_name": app_name,
                     "matched_app": app_name,
@@ -85,69 +125,34 @@ class AppOpenTool:
                 },
             )
 
-        match = self._find_best_app_match(app_name)
-        if match is None:
-            return ToolResult(
-                ok=False,
-                error="没有找到足够接近的应用。",
-                metadata={
-                    "app_name": app_name,
-                    "match_method": "none",
-                    "exit_code": exit_code,
-                    "stdout": stdout,
-                    "stderr": stderr,
-                },
-            )
-
-        matched_name, matched_path, score = match
-        retry_code, retry_stdout, retry_stderr = self.opener(matched_name)
-        if retry_code != 0:
-            return ToolResult(
-                ok=False,
-                error="打开 App 失败。",
-                metadata={
-                    "app_name": app_name,
-                    "matched_app": matched_name,
-                    "matched_path": str(matched_path),
-                    "match_score": score,
-                    "match_method": "fuzzy",
-                    "exit_code": retry_code,
-                    "stdout": retry_stdout,
-                    "stderr": retry_stderr,
-                },
-            )
-
         return ToolResult(
-            ok=True,
-            content=f"已根据描述“{app_name}”请求系统打开最接近的 App：{matched_name}",
+            ok=False,
+            error="没有找到足够接近的应用。",
             metadata={
                 "app_name": app_name,
-                "matched_app": matched_name,
-                "matched_path": str(matched_path),
-                "match_score": score,
-                "match_method": "fuzzy",
-                "exit_code": retry_code,
-                "stdout": retry_stdout,
-                "stderr": retry_stderr,
+                "match_method": "none",
+                "exit_code": exit_code,
+                "stdout": stdout,
+                "stderr": stderr,
             },
         )
 
-    def _find_best_app_match(self, query: str) -> tuple[str, Path, float] | None:
+    def _find_best_app_match(self, query: str) -> tuple[str, Path, float, list[str]] | None:
         """扫描已安装 App，并返回达到阈值的最佳候选。"""
 
         candidates = list(self._iter_installed_apps())
         scored = [
-            (name, path, self._match_score(query, name))
-            for name, path in candidates
+            (name, path, self._best_alias_score(query, aliases), aliases)
+            for name, path, aliases in candidates
         ]
         if not scored:
             return None
-        best_name, best_path, best_score = max(scored, key=lambda item: item[2])
+        best_name, best_path, best_score, best_aliases = max(scored, key=lambda item: item[2])
         if best_score < self.match_threshold:
             return None
-        return best_name, best_path, best_score
+        return best_name, best_path, best_score, best_aliases
 
-    def _iter_installed_apps(self) -> Iterable[tuple[str, Path]]:
+    def _iter_installed_apps(self) -> Iterable[tuple[str, Path, list[str]]]:
         """枚举常见 macOS 应用目录下的 `.app` 包。"""
 
         seen: set[str] = set()
@@ -159,7 +164,58 @@ class AppOpenTool:
                 key = name.casefold()
                 if name and key not in seen:
                     seen.add(key)
-                    yield name, path
+                    yield name, path, self._app_aliases(path, name)
+
+    def _app_aliases(self, app_path: Path, app_name: str) -> list[str]:
+        """读取 App 的英文目录名和本地化显示名作为匹配别名。
+
+        macOS App 的 `.app` 目录名常常是英文，例如 `NeteaseMusic.app`；
+        用户自然语言里更可能说“网易云音乐”。读取 `InfoPlist.strings`
+        能把这两个名字连接起来。
+        """
+
+        aliases = [app_name]
+        resources_dir = app_path / "Contents" / "Resources"
+        for strings_path in resources_dir.glob("*.lproj/InfoPlist.strings"):
+            content = self._read_plist_strings(strings_path)
+            if content is None:
+                continue
+            for key in ("CFBundleDisplayName", "CFBundleName"):
+                match = re.search(rf'"{key}"\s*=\s*"(?P<value>[^"]+)"\s*;', content)
+                if match:
+                    aliases.append(match.group("value").strip())
+
+        unique_aliases: list[str] = []
+        seen_aliases: set[str] = set()
+        for alias in aliases:
+            key = alias.casefold()
+            if alias and key not in seen_aliases:
+                seen_aliases.add(key)
+                unique_aliases.append(alias)
+        return unique_aliases
+
+    def _read_plist_strings(self, path: Path) -> str | None:
+        """读取 `InfoPlist.strings`，无法解码时返回 None。
+
+        不同 App 的本地化字符串文件编码并不完全一致。这里按常见编码逐个
+        尝试，仍失败就跳过该文件，避免一个异常 App 阻断整个目录扫描。
+        """
+
+        try:
+            raw_content = path.read_bytes()
+        except OSError:
+            return None
+        for encoding in ("utf-8", "utf-16", "utf-16-le", "utf-16-be"):
+            try:
+                return raw_content.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        return None
+
+    def _best_alias_score(self, query: str, aliases: list[str]) -> float:
+        """计算用户描述与多个 App 别名中的最高匹配分。"""
+
+        return max((self._match_score(query, alias) for alias in aliases), default=0.0)
 
     def _match_score(self, query: str, app_name: str) -> float:
         """计算用户描述与 App 名称的相似度。
@@ -168,18 +224,30 @@ class AppOpenTool:
         与 `Visual Studio Code` 至少共享 `code`，可以被识别为近似候选。
         """
 
-        normalized_query = self._normalize(query)
-        normalized_app = self._normalize(app_name)
-        string_score = difflib.SequenceMatcher(None, normalized_query, normalized_app).ratio()
-        query_tokens = set(normalized_query.split())
-        app_tokens = set(normalized_app.split())
+        clean_query = self._normalize(query)
+        clean_app = self._normalize(app_name)
+        if not clean_query or not clean_app:
+            return 0.0
+        if clean_app in clean_query or clean_query in clean_app:
+            return 1.0
+        string_score = difflib.SequenceMatcher(None, clean_query, clean_app).ratio()
+        query_tokens = set(clean_query.split())
+        app_tokens = set(clean_app.split())
         overlap_score = len(query_tokens & app_tokens) / len(query_tokens) if query_tokens else 0.0
         return max(string_score, overlap_score)
 
     def _normalize(self, text: str) -> str:
-        """把名称归一化为适合相似度比较的形式。"""
+        """把名称归一化为适合相似度比较的形式。
 
-        return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", text.casefold())).strip()
+        这里保留中文字符，避免“网易云音乐”这类输入被清洗成空字符串。
+        """
+
+        without_app_suffix = re.sub(r"(?i)\bapp\b", " ", text)
+        return re.sub(
+            r"\s+",
+            " ",
+            re.sub(r"[^\w\u4e00-\u9fff]+", " ", without_app_suffix.casefold()),
+        ).strip()
 
     def _default_app_dirs(self) -> list[Path]:
         """返回 macOS 常见应用目录。"""

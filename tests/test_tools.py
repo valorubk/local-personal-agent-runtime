@@ -109,6 +109,35 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(result.metadata["match_method"], "fuzzy")
         self.assertEqual(result.metadata["matched_app"], "Visual Studio Code")
 
+    def test_app_open_tool_matches_localized_app_display_name_before_direct_open(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            apps_dir = Path(tmp)
+            broken_app = apps_dir / "BrokenEncoding.app" / "Contents" / "Resources" / "zh-Hans.lproj"
+            broken_app.mkdir(parents=True)
+            (broken_app / "InfoPlist.strings").write_bytes(b"\xdf\xff\x00broken")
+            app_path = apps_dir / "NeteaseMusic.app"
+            zh_dir = app_path / "Contents" / "Resources" / "zh-Hans.lproj"
+            zh_dir.mkdir(parents=True)
+            (zh_dir / "InfoPlist.strings").write_text(
+                '"CFBundleDisplayName" = "网易云音乐";\n'
+                '"CFBundleName" = "网易云音乐";\n',
+                encoding="utf-8",
+            )
+            opened: list[str] = []
+            tool = AppOpenTool(
+                platform_name_provider=lambda: "Darwin",
+                app_dirs_provider=lambda: [apps_dir],
+                opener=lambda app_name: opened.append(app_name) or (0, "", ""),
+            )
+
+            result = tool.run({"app_name": "打开网易云音乐APP"})
+
+        self.assertTrue(result.ok)
+        self.assertEqual(opened, ["NeteaseMusic"])
+        self.assertEqual(result.metadata["match_method"], "fuzzy")
+        self.assertEqual(result.metadata["matched_app"], "NeteaseMusic")
+        self.assertIn("网易云音乐", result.metadata["matched_aliases"])
+
     def test_app_open_tool_rejects_when_no_close_candidate_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             apps_dir = Path(tmp)
