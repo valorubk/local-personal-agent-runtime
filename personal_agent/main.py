@@ -119,7 +119,7 @@ def _run(config: Optional[str] = None, debug: bool = False) -> None:
         ),
     )
 
-    console.print(build_startup_banner())
+    console.print(build_startup_banner(debug=debug))
     read_user_input = create_prompt_reader()
     while True:
         # Prompt reader 会把 `> ` 作为不可编辑提示符传给输入库，

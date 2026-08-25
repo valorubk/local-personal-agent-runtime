@@ -25,13 +25,14 @@ RAINBOW_STYLES = [
 ]
 
 
-def build_startup_banner() -> Panel:
+def build_startup_banner(debug: bool = False) -> Panel:
     """构建 Babyface 启动 Banner。
 
     Rich 的 `Text` 可以给同一段文本里的不同字符设置不同颜色。
     这里按字符循环应用彩虹色，让整块 `BABYFACE` ASCII 字体呈现彩虹效果。
 
-    注意：Banner 只负责品牌展示，不放退出命令说明。
+    `debug=True` 时会在 Banner 中标明当前是 Debug mode，避免用户误以为
+    这是普通会话。Banner 仍不放退出命令说明。
     退出命令属于帮助信息，放在 `babyface --help` 里更容易被用户主动查看。
     """
 
@@ -53,6 +54,9 @@ def build_startup_banner() -> Panel:
 
     # 底部 tagline 使用和原先小标题一致的彩虹色，让视觉有一个轻巧收尾。
     _append_rainbow_text(text, "- Your Local Personal Agent -")
+    if debug:
+        text.append("\n")
+        _append_rainbow_text(text, "Debug mode")
 
     return Panel(
         Align.center(text, vertical="middle"),

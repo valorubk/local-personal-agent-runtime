@@ -21,6 +21,16 @@ class BannerTests(unittest.TestCase):
         self.assertNotIn("exit", plain_text)
         self.assertNotIn("quit", plain_text)
         self.assertNotIn("/exit", plain_text)
+        self.assertNotIn("Debug mode", plain_text)
+
+    def test_debug_startup_banner_marks_debug_mode(self) -> None:
+        """防止用户以调试模式启动后，Banner 没有明确提示当前运行模式。"""
+
+        banner = build_startup_banner(debug=True)
+        plain_text = banner.renderable.renderable.plain
+
+        self.assertIn("- Your Local Personal Agent -", plain_text)
+        self.assertIn("Debug mode", plain_text)
 
 
 if __name__ == "__main__":

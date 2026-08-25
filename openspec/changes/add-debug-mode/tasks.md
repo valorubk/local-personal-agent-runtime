@@ -20,6 +20,7 @@
 - [x] 3.2 在 Babyface Session 启动时生成唯一 `session_id`，并传入 Runtime 或调试上下文。
 - [x] 3.3 在真实 Rich CLI 中接入调试记录器，调试模式下只写 SQLite 调试记录，普通模式保持现有输出。
 - [x] 3.4 在可测试的 `CLISession` 抽象中补充调试依赖注入能力，便于单元测试验证调试持久化开关。
+- [x] 3.5 在 Debug 模式下的启动 Banner 中展示 `Debug mode`，普通模式不展示该标识。
 
 ## 4. Agent Runtime 链路埋点
 
@@ -40,3 +41,4 @@
 - [x] 5.5 补充字段名测试，验证 SQLite 记录使用 `session_id`、`trace_id`，且不使用 `Session ID`、`Trace ID`、`sessionId` 或 `traceId` 作为字段名。
 - [x] 5.6 补充 README 或配置说明，提示调试模式会记录内部输入输出，并说明本地 SQLite 文件位置。
 - [x] 5.7 运行完整测试套件，并记录验证命令和结果。
+- [x] 5.8 补充 Banner 测试，验证 Debug 模式展示 `Debug mode`，普通模式不展示。

@@ -9,6 +9,14 @@
 - **AND** 系统开启调用链路本地调试记录持久化
 - **AND** 系统不在命令行输出调用链路调试记录
 
+#### Scenario: Debug 模式 Banner 标明运行模式
+- **WHEN** 用户运行 `babyface --debug`
+- **THEN** 启动 Banner 明确展示 `Debug mode`
+
+#### Scenario: 普通模式 Banner 不展示 Debug 标识
+- **WHEN** 用户运行 `babyface` 且未传入 `--debug`
+- **THEN** 启动 Banner 不展示 `Debug mode`
+
 #### Scenario: 普通模式不写入调试链路
 - **WHEN** 用户运行 `babyface` 且未传入 `--debug`
 - **THEN** 系统保持现有交互式 Session 行为
