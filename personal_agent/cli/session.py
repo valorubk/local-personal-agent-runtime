@@ -63,8 +63,21 @@ class CLISession:
 
         for executed in result.tool_results:
             status = "成功" if executed.result.ok else "失败"
-            self.write(f"[Tool] {executed.name} {status}")
+            source = _format_tool_source(executed.result.metadata)
+            self.write(f"[Tool] {executed.name} {status}{source}")
         self.write("")
         self.write("Babyface:")
         self.write(result.final_response)
         self.write("")
+
+
+def _format_tool_source(metadata: dict) -> str:
+    """把 Tool 来源渲染成简短后缀。
+
+    外部 MCP Tool 会在 metadata 中写入 `source=mcp` 和 server 名称。
+    CLI 只展示来源摘要，避免把完整配置、headers 或敏感 token 打出来。
+    """
+
+    if metadata.get("source") == "mcp" and metadata.get("server"):
+        return f" (MCP: {metadata['server']})"
+    return ""

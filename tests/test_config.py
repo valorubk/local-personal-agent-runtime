@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import os
 from pathlib import Path
 
 from personal_agent.config import ConfigError, load_settings
@@ -31,9 +32,28 @@ class ConfigTests(unittest.TestCase):
     def test_default_memory_path_uses_memory_directory(self) -> None:
         """防止默认 SQLite 文件继续堆在 `.babyface` 根目录。"""
 
-        settings = load_settings(env={"OPENAI_API_KEY": "test-key"})
+        old_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                settings = load_settings(env={"OPENAI_API_KEY": "test-key"})
+            finally:
+                os.chdir(old_cwd)
 
         self.assertEqual(settings.memory_db_path, Path(".babyface/memory/memory.sqlite3"))
+        self.assertIsNone(settings.mcp_config_path)
+
+    def test_env_overrides_mcp_config_path(self) -> None:
+        """防止用户无法把 MCP 配置文件放在项目默认路径之外。"""
+
+        settings = load_settings(
+            env={
+                "OPENAI_API_KEY": "test-key",
+                "BABYFACE_MCP_CONFIG_PATH": "/tmp/mcp.json",
+            }
+        )
+
+        self.assertEqual(settings.mcp_config_path, Path("/tmp/mcp.json"))
 
     def test_project_config_file_is_read_when_env_is_absent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -44,6 +64,7 @@ class ConfigTests(unittest.TestCase):
                         'openai_api_key = "file-key"',
                         'openai_model = "file-model"',
                         'memory_db_path = "data/memory.sqlite3"',
+                        'mcp_config_path = "config/mcp.json"',
                         "shell_timeout_seconds = 3",
                     ]
                 ),
@@ -55,6 +76,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.openai_api_key, "file-key")
         self.assertEqual(settings.openai_model, "file-model")
         self.assertEqual(settings.memory_db_path, Path("data/memory.sqlite3"))
+        self.assertEqual(settings.mcp_config_path, Path("config/mcp.json"))
         self.assertEqual(settings.shell_timeout_seconds, 3)
 
     def test_user_config_file_is_read_from_config_directory(self) -> None:

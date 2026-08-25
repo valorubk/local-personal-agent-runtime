@@ -1,7 +1,8 @@
 import unittest
 
-from personal_agent.agent.runtime import RuntimeResult
+from personal_agent.agent.runtime import ExecutedTool, RuntimeResult
 from personal_agent.cli.session import CLISession
+from personal_agent.tools.base import ToolResult
 
 
 class FakeRuntime:
@@ -59,6 +60,40 @@ class CLISessionTests(unittest.TestCase):
         self.assertIn("系统异常", rendered)
         self.assertNotIn("Traceback", rendered)
         self.assertIn("再见。", outputs)
+
+    def test_session_renders_mcp_tool_source(self) -> None:
+        """防止外部 MCP Tool 调用时看不到来源 Server，难以排查配置。"""
+
+        class McpRuntime:
+            def run_turn(self, user_input: str) -> RuntimeResult:
+                return RuntimeResult(
+                    final_response="天气晴朗",
+                    stream=["天气晴朗"],
+                    tool_results=[
+                        ExecutedTool(
+                            id="call-1",
+                            name="weather__forecast",
+                            arguments={"city": "Shanghai"},
+                            result=ToolResult(
+                                ok=True,
+                                content="晴",
+                                metadata={"source": "mcp", "server": "weather"},
+                            ),
+                        )
+                    ],
+                )
+
+        inputs = iter(["查天气", "/exit"])
+        outputs = []
+        session = CLISession(
+            runtime=McpRuntime(),  # type: ignore[arg-type]
+            read_input=lambda prompt: next(inputs),
+            write=outputs.append,
+        )
+
+        session.run()
+
+        self.assertIn("[Tool] weather__forecast 成功 (MCP: weather)", outputs)
 
 
 if __name__ == "__main__":

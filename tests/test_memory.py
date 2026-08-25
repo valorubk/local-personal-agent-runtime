@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from personal_agent.memory.store import MemoryStore
@@ -43,7 +44,7 @@ class MemoryStoreTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "memory.sqlite3"
-            with sqlite3.connect(db_path) as conn:
+            with closing(sqlite3.connect(db_path)) as conn:
                 conn.executescript(
                     """
                     CREATE TABLE task_history (
@@ -68,7 +69,7 @@ class MemoryStoreTests(unittest.TestCase):
 
             MemoryStore(db_path)
 
-            with sqlite3.connect(db_path) as conn:
+            with closing(sqlite3.connect(db_path)) as conn:
                 task_columns = {row[1] for row in conn.execute("PRAGMA table_info(task_history)")}
                 tool_columns = {row[1] for row in conn.execute("PRAGMA table_info(tool_calls)")}
 

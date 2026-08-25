@@ -28,6 +28,7 @@ class Settings:
     openai_model: str
     memory_db_path: Path
     shell_timeout_seconds: int
+    mcp_config_path: Path | None = None
 
 
 def load_settings(
@@ -86,12 +87,17 @@ def load_settings(
     if timeout <= 0:
         raise ConfigError("BABYFACE_SHELL_TIMEOUT_SECONDS 必须大于 0。")
 
+    # MCP 配置独立于 babyface.toml：运行配置只负责告诉系统“去哪里读 MCP 清单”。
+    # 真正的 MCP Server 列表放在 mcp.json / mcp.yaml 中，方便复用生态里的 JSON 片段。
+    mcp_config_path = _resolve_mcp_config_path(source_env, config)
+
     return Settings(
         openai_api_key=str(api_key),
         openai_base_url=base_url,
         openai_model=str(model),
         memory_db_path=Path(str(memory_path)),
         shell_timeout_seconds=timeout,
+        mcp_config_path=mcp_config_path,
     )
 
 
@@ -146,6 +152,31 @@ def _default_config_candidates(env: Mapping[str, str]) -> list[Path]:
         # 兼容旧版默认位置，避免用户升级后因为配置文件没迁移而无法启动。
         candidates.append(babyface_dir / "config.toml")
     return candidates
+
+
+def _resolve_mcp_config_path(
+    env: Mapping[str, str],
+    config: Mapping[str, object],
+) -> Path | None:
+    """解析 MCP 配置文件路径。
+
+    优先级与 OpenSpec 约定保持一致：
+    1. 环境变量 `BABYFACE_MCP_CONFIG_PATH`
+    2. TOML 运行配置里的 `mcp_config_path`
+    3. 项目默认 `.babyface/config/mcp.json`
+    4. 项目默认 `.babyface/config/mcp.yaml`
+
+    默认路径不存在时返回 `None`，表示只加载内置 Tool。
+    """
+
+    explicit = _get_value(env, config, "BABYFACE_MCP_CONFIG_PATH", "mcp_config_path")
+    if explicit not in (None, ""):
+        return Path(str(explicit))
+
+    for candidate in (Path(".babyface/config/mcp.json"), Path(".babyface/config/mcp.yaml")):
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def _get_value(

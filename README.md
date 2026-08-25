@@ -13,6 +13,7 @@ V1 的目标是先跑通一个类似 Claude Code 交互体验的本地个人助�
   - File Tool：读取本地文本文件。
   - Shell Tool：执行本地命令，执行前必须二次确认。
   - Web Tool：V1 占位，返回“尚未实现”。
+  - MCP Tool：通过 JSON/YAML 配置接入外部 MCP Server。
 - 使用 SQLite 保存本地 Memory：
   - Profile Memory
   - Task History
@@ -56,6 +57,7 @@ export OPENAI_MODEL="your-model"
 ```bash
 export BABYFACE_MEMORY_DB_PATH=".babyface/memory/memory.sqlite3"
 export BABYFACE_SHELL_TIMEOUT_SECONDS="10"
+export BABYFACE_MCP_CONFIG_PATH=".babyface/config/mcp.json"
 ```
 
 也可以创建项目内配置文件 `babyface.toml`：
@@ -66,6 +68,7 @@ openai_base_url = "https://your-openai-compatible-endpoint/v1"
 openai_model = "your-model"
 memory_db_path = ".babyface/memory/memory.sqlite3"
 shell_timeout_seconds = 10
+mcp_config_path = ".babyface/config/mcp.json"
 ```
 
 日常命令行使用时，也可以把配置放在用户目录：
@@ -98,6 +101,98 @@ OPENAI_API_KEY = "your-api-key"
 BASE_URL = "https://your-openai-compatible-endpoint/v1"
 MODEL = "your-model"
 ```
+
+## MCP Server 配置
+
+Babyface 可以通过配置文件接入外部 MCP Server。推荐优先使用 JSON，因为 MCP 生态中常见的注册方式就是 `mcp.json`、`.cursor/mcp.json`、`.vscode/mcp.json` 或 `cline_mcp_settings.json` 这类 JSON 文件。
+
+默认读取顺序：
+
+```text
+.babyface/config/mcp.json
+.babyface/config/mcp.yaml
+```
+
+也可以通过环境变量或 `babyface.toml` 覆盖路径：
+
+```bash
+export BABYFACE_MCP_CONFIG_PATH="/absolute/path/to/mcp.json"
+```
+
+```toml
+mcp_config_path = "/absolute/path/to/mcp.json"
+```
+
+### JSON 示例：接入 Weather MCP Server
+
+参考 `mcp_weather_server` 的注册方式，可以先安装外部 MCP Server：
+
+```bash
+python -m pip install mcp_weather_server
+```
+
+然后创建 `.babyface/config/mcp.json`：
+
+```json
+{
+  "mcpServers": {
+    "weather": {
+      "command": "python",
+      "args": ["-m", "mcp_weather_server"],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
+```
+
+Babyface 会把这个 stdio MCP Server 暴露的工具注册为带命名空间的 Tool，例如：
+
+```text
+weather__<tool_name>
+```
+
+### JSON 示例：Streamable HTTP MCP Server
+
+```json
+{
+  "mcpServers": {
+    "docs": {
+      "transport": "streamable_http",
+      "url": "https://example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${DOCS_MCP_TOKEN}"
+      },
+      "timeout_seconds": 30,
+      "disabled": false
+    }
+  }
+}
+```
+
+### YAML 等价示例
+
+如果更偏好手写配置，也可以创建 `.babyface/config/mcp.yaml`：
+
+```yaml
+mcp_servers:
+  weather:
+    transport: stdio
+    command: python
+    args:
+      - -m
+      - mcp_weather_server
+    enabled: true
+  docs:
+    transport: streamable_http
+    url: https://example.com/mcp
+    headers:
+      Authorization: Bearer ${DOCS_MCP_TOKEN}
+    timeout_seconds: 30
+    enabled: true
+```
+
+本能力只支持 MCP 协议里的 stdio 和 Streamable HTTP transport。它不会提供通用 HTTP Tool，也不会让 Agent 任意请求用户给出的 URL；通用 HTTP 请求能力会作为后续独立需求建设。
 
 ## AGENTS.md
 
