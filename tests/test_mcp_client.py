@@ -97,6 +97,79 @@ class McpClientTests(unittest.TestCase):
         self.assertIsNotNone(captured["errlog"])
         self.assertTrue(hasattr(captured["errlog"], "write"))
 
+    def test_sdk_stdio_client_inherits_network_environment_for_external_api_calls(self) -> None:
+        """防止依赖代理或证书环境变量的 MCP Server 在子进程里网络失败。"""
+
+        captured: dict[str, object] = {}
+
+        @dataclass
+        class FakeStdioServerParameters:
+            command: str
+            args: list[str]
+            env: dict[str, str] | None = None
+
+        class FakeClientSession:
+            def __init__(self, read_stream, write_stream) -> None:
+                self.read_stream = read_stream
+                self.write_stream = write_stream
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def initialize(self) -> None:
+                return None
+
+        @asynccontextmanager
+        async def fake_stdio_client(server, *, errlog=None):
+            captured["server"] = server
+            yield "read", "write"
+
+        fake_mcp = ModuleType("mcp")
+        fake_mcp.ClientSession = FakeClientSession
+        fake_mcp.StdioServerParameters = FakeStdioServerParameters
+        fake_client_package = ModuleType("mcp.client")
+        fake_stdio_module = ModuleType("mcp.client.stdio")
+        fake_stdio_module.stdio_client = fake_stdio_client
+
+        config = McpServerConfig(
+            name="weather",
+            transport="stdio",
+            command="python",
+            env={"HTTPS_PROXY": "http://configured-proxy:7890"},
+        )
+        client = SdkMcpServerClient(config)
+        with (
+            patch.dict(
+                "sys.modules",
+                {
+                    "mcp": fake_mcp,
+                    "mcp.client": fake_client_package,
+                    "mcp.client.stdio": fake_stdio_module,
+                },
+            ),
+            patch.dict(
+                "os.environ",
+                {
+                    "HTTP_PROXY": "http://shell-proxy:7890",
+                    "HTTPS_PROXY": "http://shell-proxy:7890",
+                    "NO_PROXY": "localhost,127.0.0.1",
+                    "SSL_CERT_FILE": "/tmp/cert.pem",
+                },
+                clear=True,
+            ),
+        ):
+            client.connect()
+            client.close()
+
+        env = captured["server"].env
+        self.assertEqual(env["HTTP_PROXY"], "http://shell-proxy:7890")
+        self.assertEqual(env["HTTPS_PROXY"], "http://configured-proxy:7890")
+        self.assertEqual(env["NO_PROXY"], "localhost,127.0.0.1")
+        self.assertEqual(env["SSL_CERT_FILE"], "/tmp/cert.pem")
+
     def test_manager_registers_enabled_stdio_server_tools(self) -> None:
         """防止已启用 MCP Server 的工具没有暴露给 Agent。"""
 

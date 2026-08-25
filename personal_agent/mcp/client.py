@@ -10,6 +10,22 @@ from personal_agent.mcp.config import McpServerConfig
 from personal_agent.tools.base import ToolResult
 
 
+STDIO_NETWORK_ENV_KEYS = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+)
+
+
 @dataclass(frozen=True)
 class McpToolDefinition:
     """外部 MCP Server 暴露的 Tool 定义。
@@ -199,7 +215,7 @@ class SdkMcpServerClient:
             params = StdioServerParameters(
                 command=self.config.command or "",
                 args=self.config.args,
-                env=self.config.env or None,
+                env=_stdio_child_env(self.config.env),
             )
             # stdio MCP Server 的 stderr 常被 SDK 默认接到当前终端。
             # 外部 Server 的 INFO 日志属于实现细节，不能在启动或 Tool 调用时刷屏。
@@ -250,6 +266,20 @@ def _definition_from_sdk_tool(tool: Any) -> McpToolDefinition:
             or {"type": "object", "properties": {}}
         ),
     )
+
+
+def _stdio_child_env(config_env: dict[str, str]) -> dict[str, str] | None:
+    """为 stdio MCP 子进程准备额外环境变量。
+
+    MCP SDK 默认只继承少量安全环境变量，不包含代理和证书相关变量。
+    天气、地图、知识库等 MCP Server 往往需要继续访问外部 API；如果用户
+    的终端依赖代理或自定义证书，缺少这些变量会让子进程里出现 Network error。
+    显式写在 MCP 配置里的 env 优先级最高，方便用户覆盖本机默认值。
+    """
+
+    inherited = {key: os.environ[key] for key in STDIO_NETWORK_ENV_KEYS if key in os.environ}
+    merged = {**inherited, **config_env}
+    return merged or None
 
 
 def _content_to_text(result: Any) -> str:
