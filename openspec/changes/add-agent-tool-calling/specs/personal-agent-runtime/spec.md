@@ -1,53 +1,61 @@
 ## ADDED Requirements
 
-### Requirement: 通过 YAML 配置外部 MCP Server
-系统 SHALL 允许用户通过 YAML 配置文件声明外部 MCP Server，并在启动 Babyface Session 时加载该配置。
+### Requirement: 通过配置文件声明外部 MCP Server
+系统 SHALL 允许用户通过 JSON 或 YAML 配置文件声明外部 MCP Server，并在启动 Babyface Session 时加载该配置。
+
+#### Scenario: 读取默认 MCP JSON 配置
+- **WHEN** 用户未显式指定 MCP 配置路径，且当前项目存在 `.babyface/config/mcp.json`
+- **THEN** 系统读取该 JSON 文件作为外部 MCP Server 配置
 
 #### Scenario: 读取默认 MCP YAML 配置
-- **WHEN** 用户未显式指定 MCP 配置路径，且当前项目存在 `.babyface/config/mcp.yaml`
+- **WHEN** 用户未显式指定 MCP 配置路径，且当前项目不存在 `.babyface/config/mcp.json` 但存在 `.babyface/config/mcp.yaml`
 - **THEN** 系统读取该 YAML 文件作为外部 MCP Server 配置
 
 #### Scenario: 通过环境变量覆盖 MCP 配置路径
-- **WHEN** 用户设置 `BABYFACE_MCP_CONFIG_PATH` 指向一个 YAML 文件
+- **WHEN** 用户设置 `BABYFACE_MCP_CONFIG_PATH` 指向一个 JSON 或 YAML 文件
 - **THEN** 系统优先读取该文件作为外部 MCP Server 配置
 
 #### Scenario: 通过运行配置覆盖 MCP 配置路径
-- **WHEN** 用户在 Babyface 运行配置中设置 MCP YAML 配置路径
+- **WHEN** 用户在 Babyface 运行配置中设置 MCP 配置文件路径
 - **THEN** 系统使用该路径读取外部 MCP Server 配置
 
-#### Scenario: 没有 MCP YAML 配置时仍可运行
-- **WHEN** 用户未提供任何 MCP YAML 配置文件
+#### Scenario: 没有 MCP 配置文件时仍可运行
+- **WHEN** 用户未提供任何 MCP 配置文件
 - **THEN** 系统仅注册内置 Tool 并正常启动 Session
 
-#### Scenario: MCP YAML 配置格式错误
-- **WHEN** 用户提供的 MCP YAML 配置无法解析或缺少必要字段
+#### Scenario: MCP 配置文件格式错误
+- **WHEN** 用户提供的 MCP 配置文件无法解析或缺少必要字段
 - **THEN** 系统拒绝启动外部 MCP Server，并展示中文友好错误说明
 
+#### Scenario: 兼容 MCP 生态常见 JSON 字段
+- **WHEN** 用户提供的 JSON 配置使用 `mcpServers` 声明 server，并使用 `disabled` 表示禁用状态
+- **THEN** 系统可以读取该配置并转换为内部 MCP Server 配置
+
 #### Scenario: 配置 stdio MCP Server
-- **WHEN** 用户在 MCP YAML 配置中声明 `transport: stdio`，并提供启动命令和参数
+- **WHEN** 用户在 MCP 配置文件中声明 `transport: stdio`，并提供启动命令和参数
 - **THEN** 系统将该配置识别为本地 stdio MCP Server
 
 #### Scenario: 配置 Streamable HTTP MCP Server
-- **WHEN** 用户在 MCP YAML 配置中声明 `transport: streamable_http`，并提供 HTTP URL
+- **WHEN** 用户在 MCP 配置文件中声明 `transport: streamable_http`，并提供 HTTP URL
 - **THEN** 系统将该配置识别为 MCP over HTTP Server，而不是通用 HTTP Tool
 
 ### Requirement: 管理外部 MCP Server 生命周期
 系统 SHALL 在 Babyface Session 生命周期内启动、使用并关闭已启用的外部 MCP Server，且单个 Server 异常不应导致整个 Session 崩溃。
 
 #### Scenario: 启动已启用的 stdio MCP Server
-- **WHEN** MCP YAML 配置中存在启用状态的 stdio MCP Server
+- **WHEN** MCP 配置文件中存在启用状态的 stdio MCP Server
 - **THEN** 系统按配置启动该 Server，并发现其可用 Tool
 
 #### Scenario: 连接已启用的 Streamable HTTP MCP Server
-- **WHEN** MCP YAML 配置中存在启用状态的 Streamable HTTP MCP Server
+- **WHEN** MCP 配置文件中存在启用状态的 Streamable HTTP MCP Server
 - **THEN** 系统按配置连接该 Server，并发现其可用 Tool
 
 #### Scenario: Streamable HTTP MCP Server 使用请求头
-- **WHEN** MCP YAML 配置为 Streamable HTTP MCP Server 声明请求头或鉴权 token
+- **WHEN** MCP 配置文件为 Streamable HTTP MCP Server 声明请求头或鉴权 token
 - **THEN** 系统在连接和调用该 MCP Server 时带上对应请求头
 
 #### Scenario: 忽略禁用的 MCP Server
-- **WHEN** MCP YAML 配置中存在 `enabled: false` 的 MCP Server
+- **WHEN** MCP 配置文件中存在 `enabled: false` 或 `disabled: true` 的 MCP Server
 - **THEN** 系统不启动该 Server，也不注册它提供的 Tool
 
 #### Scenario: MCP Server 启动失败
