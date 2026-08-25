@@ -92,7 +92,12 @@ def _run(config: Optional[str] = None) -> None:
     )
 
     # Runtime 是 Agent 的核心；CLI 只负责输入输出，不关心 LangGraph 细节。
-    runtime = AgentRuntime(settings=settings, memory=memory, tools=tools)
+    runtime = AgentRuntime(
+        settings=settings,
+        memory=memory,
+        tools=tools,
+        enable_agents_update=True,
+    )
 
     console.print(build_startup_banner())
     read_user_input = create_prompt_reader()
