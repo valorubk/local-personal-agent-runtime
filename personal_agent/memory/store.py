@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -26,6 +27,11 @@ class MemoryStore:
 
         # SQLite 文件所在目录可能不存在，例如 `.babyface/`，这里先创建目录。
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # 默认 Memory 路径从 `.babyface/memory.sqlite3` 调整到
+        # `.babyface/memory/memory.sqlite3`。如果用户机器上只有旧默认文件，
+        # 这里先迁移文件，避免升级后看起来“记忆丢了”。
+        self._migrate_legacy_default_database()
 
         # 初始化表结构。`CREATE TABLE IF NOT EXISTS` 让重复启动不会报错。
         self._initialize()
@@ -229,6 +235,25 @@ class MemoryStore:
             self._ensure_column(conn, "task_history", "trace_id", "TEXT")
             self._ensure_column(conn, "tool_calls", "session_id", "TEXT")
             self._ensure_column(conn, "tool_calls", "trace_id", "TEXT")
+
+    def _migrate_legacy_default_database(self) -> None:
+        """把旧默认 Memory SQLite 文件迁移到新的 memory 子目录。
+
+        这个迁移只针对默认形状的路径：
+        `.babyface/memory/memory.sqlite3`
+
+        如果用户通过配置显式指定了其它 SQLite 路径，MemoryStore 不会猜测或移动
+        用户文件，避免误操作自定义数据。
+        """
+
+        if self.db_path.name != "memory.sqlite3" or self.db_path.parent.name != "memory":
+            return
+
+        legacy_path = self.db_path.parent.parent / "memory.sqlite3"
+        if self.db_path.exists() or not legacy_path.exists():
+            return
+
+        shutil.move(str(legacy_path), str(self.db_path))
 
     def _ensure_column(
         self,

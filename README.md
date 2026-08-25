@@ -17,7 +17,7 @@ V1 的目标是先跑通一个类似 Claude Code 交互体验的本地个人助�
   - Profile Memory
   - Task History
   - Tool 调用摘要
-- SQLite 默认位置为 `.babyface/memory.sqlite3`，支持配置覆盖。
+- SQLite 默认位置为 `.babyface/memory/memory.sqlite3`，支持配置覆盖。
 - 支持通过分层 `AGENTS.md` 自定义 Babyface 的长期行为指令。
 - CLI 输出使用中文提示，最终回答支持流式展示路径。
 
@@ -54,7 +54,7 @@ export OPENAI_MODEL="your-model"
 可选配置：
 
 ```bash
-export BABYFACE_MEMORY_DB_PATH=".babyface/memory.sqlite3"
+export BABYFACE_MEMORY_DB_PATH=".babyface/memory/memory.sqlite3"
 export BABYFACE_SHELL_TIMEOUT_SECONDS="10"
 ```
 
@@ -64,17 +64,17 @@ export BABYFACE_SHELL_TIMEOUT_SECONDS="10"
 openai_api_key = "your-api-key"
 openai_base_url = "https://your-openai-compatible-endpoint/v1"
 openai_model = "your-model"
-memory_db_path = ".babyface/memory.sqlite3"
+memory_db_path = ".babyface/memory/memory.sqlite3"
 shell_timeout_seconds = 10
 ```
 
 日常命令行使用时，也可以把配置放在用户目录：
 
 ```text
-~/.babyface/config.toml
+~/.babyface/config/config.toml
 ```
 
-没有显式传入 `--config`、也没有设置 `BABYFACE_CONFIG_PATH` 时，Babyface 会先尝试读取当前目录的 `babyface.toml`，再尝试读取用户目录的 `~/.babyface/config.toml`。
+没有显式传入 `--config`、也没有设置 `BABYFACE_CONFIG_PATH` 时，Babyface 会先尝试读取当前目录的 `babyface.toml`，再尝试读取用户目录的 `~/.babyface/config/config.toml`。为了兼容旧版本，如果新路径不存在，也会回退读取 `~/.babyface/config.toml`。
 
 本地验证时也可以使用不会提交到 Git 的私密配置文件：
 
@@ -101,7 +101,7 @@ MODEL = "your-model"
 
 ## AGENTS.md
 
-`AGENTS.md` 用来写给 Agent 看的长期行为指令，例如交流风格、项目规则、工作偏好和未来多 Agent 的共享说明。它不承载 API key、模型、Memory 路径或 Shell timeout，这些运行配置仍放在环境变量、`babyface.toml` 或 `~/.babyface/config.toml` 中。
+`AGENTS.md` 用来写给 Agent 看的长期行为指令，例如交流风格、项目规则、工作偏好和未来多 Agent 的共享说明。它不承载 API key、模型、Memory 路径或 Shell timeout，这些运行配置仍放在环境变量、`babyface.toml` 或 `~/.babyface/config/config.toml` 中。
 
 Babyface 会按全局到局部的顺序读取存在的 `AGENTS.md`：
 
@@ -212,7 +212,7 @@ babyface --debug
 默认数据库位置：
 
 ```text
-.babyface/memory.sqlite3
+.babyface/memory/memory.sqlite3
 ```
 
 Memory 分成两层：

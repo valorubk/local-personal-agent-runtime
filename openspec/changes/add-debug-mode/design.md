@@ -98,15 +98,27 @@ Debug recorder 只负责把事件写入 Debug Store，不接受 CLI 输出回调
 
 `stage` 保存 `user_input_received`、`llm_before`、`llm_after`、`tool_before`、`tool_after`、`skill_before`、`skill_after` 等阶段名称。`metadata` 使用 JSON 字符串保存模型名、tool_call_id、错误类型、节点名等结构化补充字段。使用单表可以减少 V1 schema 复杂度；如果后续需要查询优化，再按事件类型拆表或加索引。
 
-### 9. Memory 历史表也保存关联 ID
+### 9. 本地运行文件按类型分目录保存
 
-为了让 `.babyface/memory.sqlite3` 中的 Task History 和 Tool 调用摘要能与 debug trace 互相关联，`MemoryStore` 的 `task_history` 和 `tool_calls` 表也保存 `session_id` 和 `trace_id`。
+Babyface 默认仍使用 `.babyface/` 作为本地运行目录，但不再把所有文件平铺在这个目录下：
+
+- Memory SQLite 默认路径改为 `.babyface/memory/memory.sqlite3`
+- 用户级默认配置路径改为 `~/.babyface/config/config.toml`
+- Debug trace 继续使用 `.babyface/debug/debug_trace_YYYYMMDD`
+
+显式路径不自动改写：用户通过 `BABYFACE_MEMORY_DB_PATH`、配置文件里的 `memory_db_path`、`--config` 或 `BABYFACE_CONFIG_PATH` 指定的位置仍按原样使用。
+
+为了避免升级后看不到旧数据，MemoryStore 在默认新路径初始化时，如果 `.babyface/memory/memory.sqlite3` 不存在但旧默认 `.babyface/memory.sqlite3` 存在，会先把旧文件迁移到新路径再初始化表结构。用户级配置读取则优先尝试 `~/.babyface/config/config.toml`，如果不存在再回退读取旧的 `~/.babyface/config.toml`。
+
+### 10. Memory 历史表也保存关联 ID
+
+为了让 `.babyface/memory/memory.sqlite3` 中的 Task History 和 Tool 调用摘要能与 debug trace 互相关联，`MemoryStore` 的 `task_history` 和 `tool_calls` 表也保存 `session_id` 和 `trace_id`。
 
 现有数据库需要兼容升级：`MemoryStore._initialize()` 在创建表后检查表字段，缺少 `session_id` 或 `trace_id` 时通过 `ALTER TABLE` 增加可空文本列。旧记录没有这些 ID 时保持 `NULL`，新记录在 Runtime 调用 `save_task_history()` 时写入当前轮的 `session_id` 和 `trace_id`。
 
 `tool_calls` 表也保存同一组 ID，虽然可以通过 `task_id` 关联回 `task_history`，但冗余字段能让用户直接查询工具调用记录时不用每次 join。
 
-### 10. Shell 二次确认和流式输出保持现有体验
+### 11. Shell 二次确认和流式输出保持现有体验
 
 Shell Tool 的二次确认仍由 CLI 注入的 `confirm_shell()` 负责。调试模式只记录确认结果和 Tool 输出，不绕过用户确认，也不在确认前执行命令。
 

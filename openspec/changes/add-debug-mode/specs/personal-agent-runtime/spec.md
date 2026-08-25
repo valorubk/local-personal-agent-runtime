@@ -1,5 +1,24 @@
 ## ADDED Requirements
 
+### Requirement: 本地运行文件按类型分目录保存
+系统 SHALL 将 Babyface 默认创建或读取的本地运行文件按类型放入 `.babyface` 下的子目录，避免全部堆在 `.babyface` 根目录。
+
+#### Scenario: 默认 Memory SQLite 放入 memory 目录
+- **WHEN** 用户未通过环境变量或配置文件覆盖 Memory SQLite 路径
+- **THEN** 系统默认使用 `.babyface/memory/memory.sqlite3`
+
+#### Scenario: 默认用户配置放入 config 目录
+- **WHEN** 用户未通过 `--config` 或 `BABYFACE_CONFIG_PATH` 显式指定配置文件
+- **THEN** 系统尝试读取用户目录下的 `~/.babyface/config/config.toml`
+
+#### Scenario: 兼容旧默认用户配置路径
+- **WHEN** 用户目录下不存在 `~/.babyface/config/config.toml` 但存在旧路径 `~/.babyface/config.toml`
+- **THEN** 系统仍可读取旧路径配置
+
+#### Scenario: 兼容旧默认 Memory SQLite 文件
+- **WHEN** 默认新路径 `.babyface/memory/memory.sqlite3` 不存在但旧路径 `.babyface/memory.sqlite3` 存在
+- **THEN** 系统复用旧文件中的 Memory 数据并将其迁移到 `.babyface/memory/memory.sqlite3`
+
 ### Requirement: 支持 Babyface 调试模式
 系统 SHALL 支持用户通过 `babyface --debug` 启动调试模式，并在未传入该参数时保持普通模式的终端输出和调试持久化行为不变。
 

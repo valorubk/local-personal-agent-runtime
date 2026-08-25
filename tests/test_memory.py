@@ -77,6 +77,24 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertIn("session_id", tool_columns)
         self.assertIn("trace_id", tool_columns)
 
+    def test_memory_store_moves_legacy_default_database_into_memory_directory(self) -> None:
+        """防止默认路径调整后看不到旧 `.babyface/memory.sqlite3` 里的数据。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            babyface_dir = root / ".babyface"
+            legacy_path = babyface_dir / "memory.sqlite3"
+            new_path = babyface_dir / "memory" / "memory.sqlite3"
+            babyface_dir.mkdir(parents=True)
+            legacy_store = MemoryStore(legacy_path)
+            legacy_store.save_profile("favorite_food", "梅菜扣肉")
+
+            migrated_store = MemoryStore(new_path)
+
+            self.assertEqual(migrated_store.get_profile("favorite_food"), "梅菜扣肉")
+            self.assertTrue(new_path.exists())
+            self.assertFalse(legacy_path.exists())
+
     def test_retrieve_knowledge_returns_compatible_empty_list(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = MemoryStore(Path(tmp) / "memory.sqlite3")

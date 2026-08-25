@@ -44,3 +44,6 @@
 - [x] 5.8 补充 Banner 测试，验证 Debug 模式展示 `Debug mode`，普通模式不展示。
 - [x] 5.9 更新 MemoryStore，使 `task_history` 和 `tool_calls` 保存 `session_id`、`trace_id`，并兼容已有 SQLite 表结构。
 - [x] 5.10 补充 Memory 和 Runtime 测试，验证 Task History、Tool 调用摘要与 debug trace 可通过 `session_id`、`trace_id` 关联。
+- [x] 5.11 将默认 Memory SQLite 路径调整为 `.babyface/memory/memory.sqlite3`，并兼容迁移旧默认文件。
+- [x] 5.12 将默认用户配置路径调整为 `~/.babyface/config/config.toml`，并兼容读取旧默认配置文件。
+- [x] 5.13 更新 README 中的本地文件路径说明，避免继续引导用户把文件放在 `.babyface` 根目录。
