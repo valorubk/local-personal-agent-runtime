@@ -2,7 +2,7 @@
 
 当前 Babyface 的主入口在 `personal_agent/main.py`，由 Typer 解析 CLI 参数、Rich 渲染终端输出，并把真实交互循环接到 `AgentRuntime`。`AgentRuntime` 使用 LangGraph 组织 `prepare -> llm -> tools -> llm -> finalize` 的基础 Agent Loop，`MemoryStore` 已通过 SQLite 保存 Profile Memory、Task History 和 Tool 调用摘要。
 
-本变更需要在不改变普通模式体验的前提下，给调试模式增加一条横切链路：CLI 负责开启调试和展示调试事件，Runtime 负责在各节点产生调试事件，独立 Debug Store 负责按日期写入 SQLite。
+本变更需要在不改变普通模式体验的前提下，给调试模式增加一条横切链路：CLI 负责开启调试模式，Runtime 负责在各节点产生调试事件，独立 Debug Store 负责按日期写入 SQLite。
 
 ## Goals / Non-Goals
 
@@ -11,7 +11,7 @@
 - `babyface --debug` 显式开启调试模式，普通 `babyface` 保持现有输出和持久化行为。
 - 每次 CLI Session 生成一个 `session_id`，每轮 `run_turn()` 生成一个 `trace_id`。
 - 调试事件覆盖接受用户输入后、LLM 调用前后、Tool 调用前后、Skill 调用前后，并统一包含输入、输出、`session_id`、`trace_id`、系统时间。
-- 调试事件同时输出到命令行和写入当天 SQLite 文件。
+- 调试事件只写入当天 SQLite 文件，不向命令行输出调用链路调试记录。
 - 调试持久化失败时只影响调试记录，不导致 Agent Session 崩溃。
 
 **Non-Goals:**
@@ -37,11 +37,10 @@
 
 1. 组装 before/after 调试事件。
 2. 补充 `session_id`、`trace_id`、系统时间和阶段名称。
-3. 格式化命令行输出。
-4. 写入当天 SQLite。
-5. 捕获调试持久化失败并转成友好提示。
+3. 写入当天 SQLite。
+4. 捕获调试持久化失败并转成友好提示。
 
-这样 Runtime、LLM、Tool、Skill 代码仍然表达“我要调用谁、传什么参数、拿什么结果”，不会到处出现重复的 Rich 输出、SQL insert 或时间格式化代码。
+这样 Runtime、LLM、Tool、Skill 代码仍然表达“我要调用谁、传什么参数、拿什么结果”，不会到处出现重复的 SQL insert 或时间格式化代码。
 
 备选方案是在 `_call_llm()`、`_run_tools()`、`_run_post_turn_maintenance()` 中直接拼文本和写 SQLite。它实现最快，但后续每加一个节点都要复制同类逻辑，架构会很快变脏，因此不采用。
 
@@ -61,7 +60,7 @@
 
 `session_id` 和 `trace_id` 使用 UUID 字符串。CLI 启动交互式 Session 时生成 `session_id`，并把它注入 Runtime 或 Debug Context；Runtime 每次 `run_turn()` 开始时生成 `trace_id`，并放入 LangGraph state，供 `_prepare`、`_call_llm`、`_run_tools`、`_finalize` 和 post-turn Skill 维护链路复用。
 
-所有调试事件模型、命令行格式化字段和 SQLite schema 都使用蛇形字段名 `session_id` 和 `trace_id`。面向用户的说明可以描述为 Session ID 和 Trace ID，但结构化字段不得使用 `Session ID`、`Trace ID`、`sessionId` 或 `traceId`。
+所有调试事件模型和 SQLite schema 都使用蛇形字段名 `session_id` 和 `trace_id`。面向用户的说明可以描述为 Session ID 和 Trace ID，但结构化字段不得使用 `Session ID`、`Trace ID`、`sessionId` 或 `traceId`。
 
 使用 UUID 的好处是无需依赖数据库自增 ID，也不要求跨进程共享状态。备选方案是时间戳加随机数，可读性略好但冲突处理更脆弱。
 
@@ -76,22 +75,11 @@
 
 这种方式不依赖 LangGraph 内部 tracing 插件，能保持 V1 简单可测。代价是如果未来引入更多 LangGraph 节点，需要在新增节点处显式接入 recorder。
 
-### 7. 命令行调试输出由 recorder 统一格式化
+### 7. 调试模式不输出调用链路到命令行
 
-Debug recorder 同时负责把事件交给 CLI 输出端和 Debug Store。CLI 层提供 `write_debug` 或 Rich console 适配器，保证真实 CLI 和测试版 `CLISession` 都能注入轻量输出函数。
+Debug recorder 只负责把事件写入 Debug Store，不接受 CLI 输出回调，也不格式化调用链路调试文本。CLI 层仍可以展示正常 Agent 回复、Tool 状态和调试写入失败的中文友好错误提示，但不得把用户输入、LLM 输入输出、Tool 输入输出或 Skill 输入输出作为调试链路打印到命令行。
 
-调试输出建议使用稳定前缀，例如 `[Debug]`，并按事件块展示：
-
-- `type`
-- `stage`
-- `session_id`
-- `trace_id`
-- `created_at`
-- `name`
-- `input`
-- `output`
-
-这样测试可以断言关键字段，用户也能在终端中快速扫到链路。
+这样可以避免调试模式刷屏，也降低在共享终端或录屏场景中暴露敏感上下文的风险。需要排障时，用户从当天 SQLite 文件读取完整调试记录。
 
 ### 8. SQLite schema 保持通用事件表
 
@@ -119,8 +107,8 @@ Shell Tool 的二次确认仍由 CLI 注入的 `confirm_shell()` 负责。调试
 ## Risks / Trade-offs
 
 - [Risk] 调试记录可能包含用户隐私、文件内容、命令输出或 system prompt。 → Mitigation：仅在显式 `--debug` 下开启；普通模式不创建调试文件；文档和 help 中提示调试模式会记录输入输出。
-- [Risk] LLM messages 或工具输出过长，导致终端刷屏和 SQLite 文件快速膨胀。 → Mitigation：V1 先完整记录以满足排障需求；实现时为格式化输出保留截断辅助函数，但 SQLite 持久化默认保存完整 JSON 文本。
-- [Risk] 调试写入失败会干扰正常 Agent Loop。 → Mitigation：recorder 捕获 SQLite 写入异常，向 CLI 输出中文友好提示，并继续当前 Session。
+- [Risk] LLM messages 或工具输出过长，导致 SQLite 文件快速膨胀。 → Mitigation：V1 先完整记录以满足排障需求；后续如需要再增加保留策略或手动清理命令。
+- [Risk] 调试写入失败会干扰正常 Agent Loop。 → Mitigation：recorder 捕获 SQLite 写入异常，可向 CLI 输出中文友好错误提示，并继续当前 Session；该提示不得包含调用链路输入输出。
 - [Risk] Skill 调用入口当前不如 Tool 调用集中。 → Mitigation：V1 先覆盖现有 post-turn `AGENTS.md` 维护服务；后续新增 Skill 系统时要求通过统一 recorder 入口记录。
 - [Risk] 文件名没有 `.sqlite3` 后缀，用户可能不容易识别格式。 → Mitigation：遵循用户指定文件名格式，并在 README 或 help 文案中说明该文件内容为 SQLite 数据库。
 
