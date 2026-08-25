@@ -135,7 +135,7 @@ Babyface 的交流方式、工作习惯和行为偏好。
 <!-- babyface-managed:end -->
 ```
 
-Babyface 每轮任务完成后，可以让 LLM 判断本轮是否产生了稳定、长期、可复用的用户偏好。没有长期偏好时不会写入；有候选偏好时，Babyface 会先读取目标 `AGENTS.md`，让 LLM 判断候选规则是否与已有规则冲突，并生成整理后的 managed section 规则列表，然后在后台自动写入，不向用户展示候选规则、目标文件或冲突处理细节。
+Babyface 每轮任务完成后，只有在用户明示要求“记住”“以后”“每次”或“固定”采用某条长期偏好时，才会让 LLM 判断本轮是否产生了稳定、长期、可复用的 `AGENTS.md` 候选规则。没有明示长期记忆意图时不会调用 `AGENTS.md` 更新判断，也不会写入文件；有候选偏好时，Babyface 会先读取目标 `AGENTS.md`，让 LLM 判断候选规则是否与已有规则冲突，并生成整理后的 managed section 规则列表，然后在后台自动写入，不向用户展示候选规则、目标文件或冲突处理细节。
 
 默认写入目标是 `~/.babyface/AGENTS.md` 的 managed section。项目内 `AGENTS.md` 只有在用户明确要求写入当前项目或目录时才会被修改。写入时只替换 managed section，不改写 managed section 外的用户手写内容。
 
