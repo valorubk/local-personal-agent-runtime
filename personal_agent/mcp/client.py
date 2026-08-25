@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
@@ -200,7 +201,10 @@ class SdkMcpServerClient:
                 args=self.config.args,
                 env=self.config.env or None,
             )
-            read_stream, write_stream = await self._stack.enter_async_context(stdio_client(params))
+            # stdio MCP Server 的 stderr 常被 SDK 默认接到当前终端。
+            # 外部 Server 的 INFO 日志属于实现细节，不能在启动或 Tool 调用时刷屏。
+            errlog = self._stack.enter_context(open(os.devnull, "w", encoding="utf-8"))
+            read_stream, write_stream = await self._stack.enter_async_context(stdio_client(params, errlog=errlog))
         else:
             import httpx
             from mcp.client.streamable_http import streamable_http_client

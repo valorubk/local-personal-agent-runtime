@@ -1,7 +1,11 @@
 import unittest
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from types import ModuleType
+from unittest.mock import patch
 
 from personal_agent.config import ConfigError
-from personal_agent.mcp.client import McpCallResult, McpServerManager, McpToolDefinition
+from personal_agent.mcp.client import McpCallResult, McpServerManager, McpToolDefinition, SdkMcpServerClient
 from personal_agent.mcp.config import McpServerConfig
 from personal_agent.tools.registry import ToolRegistry
 
@@ -39,6 +43,60 @@ class FailingCloseMcpClient(FakeMcpClient):
 
 
 class McpClientTests(unittest.TestCase):
+    def test_sdk_stdio_client_does_not_stream_server_info_logs_to_terminal(self) -> None:
+        """防止 stdio MCP Server 的 INFO 日志直接刷到用户命令行。"""
+
+        captured: dict[str, object] = {}
+
+        @dataclass
+        class FakeStdioServerParameters:
+            command: str
+            args: list[str]
+            env: dict[str, str] | None = None
+
+        class FakeClientSession:
+            def __init__(self, read_stream, write_stream) -> None:
+                self.read_stream = read_stream
+                self.write_stream = write_stream
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def initialize(self) -> None:
+                return None
+
+        @asynccontextmanager
+        async def fake_stdio_client(server, *, errlog=None):
+            captured["server"] = server
+            captured["errlog"] = errlog
+            yield "read", "write"
+
+        fake_mcp = ModuleType("mcp")
+        fake_mcp.ClientSession = FakeClientSession
+        fake_mcp.StdioServerParameters = FakeStdioServerParameters
+        fake_client_package = ModuleType("mcp.client")
+        fake_stdio_module = ModuleType("mcp.client.stdio")
+        fake_stdio_module.stdio_client = fake_stdio_client
+
+        client = SdkMcpServerClient(McpServerConfig(name="weather", transport="stdio", command="python"))
+        with patch.dict(
+            "sys.modules",
+            {
+                "mcp": fake_mcp,
+                "mcp.client": fake_client_package,
+                "mcp.client.stdio": fake_stdio_module,
+            },
+        ):
+            client.connect()
+            client.close()
+
+        self.assertIs(captured["server"].__class__, FakeStdioServerParameters)
+        self.assertIsNotNone(captured["errlog"])
+        self.assertTrue(hasattr(captured["errlog"], "write"))
+
     def test_manager_registers_enabled_stdio_server_tools(self) -> None:
         """防止已启用 MCP Server 的工具没有暴露给 Agent。"""
 
