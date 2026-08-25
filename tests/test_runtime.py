@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from personal_agent.agent.llm import LLMResponse, ToolCall
-from personal_agent.agent.runtime import AgentsUpdateProposal, AgentRuntime
+from personal_agent.agent.runtime import AgentRuntime
 from personal_agent.config import Settings
 from personal_agent.memory.store import MemoryStore
 from personal_agent.tools.base import ToolResult
@@ -60,6 +60,23 @@ class EchoTool:
 
     def run(self, arguments):
         return ToolResult(ok=True, content=arguments["text"], metadata={"source": "fake"})
+
+
+class RecordingAgentsMdMaintenance:
+    """记录 Runtime 是否在一轮结束后调用维护服务。"""
+
+    def __init__(self, memory: MemoryStore, runtime_getter):
+        self.memory = memory
+        self.runtime_getter = runtime_getter
+        self.contexts = []
+        self.history_counts_at_call = []
+        self.conversation_lengths_at_call = []
+
+    def run(self, context):
+        self.contexts.append(context)
+        self.history_counts_at_call.append(len(self.memory.list_task_history()))
+        self.conversation_lengths_at_call.append(len(self.runtime_getter().conversation_history))
+        return None
 
 
 class AgentRuntimeTests(unittest.TestCase):
@@ -282,6 +299,62 @@ class AgentRuntimeTests(unittest.TestCase):
             runtime.run_turn("帮我计算 1+1")
 
             self.assertFalse((root / "home" / ".babyface" / "AGENTS.md").exists())
+
+    def test_runtime_does_not_call_agents_maintenance_when_update_is_disabled(self) -> None:
+        """防止默认测试或嵌入式调用路径意外触发 post-turn 维护流程。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = MemoryStore(root / "memory.sqlite3")
+            llm = FakeLLMClient([LLMResponse(content="收到。")])
+            runtime_ref = {}
+            maintenance = RecordingAgentsMdMaintenance(store, lambda: runtime_ref["runtime"])
+            runtime = AgentRuntime(
+                settings=self.make_settings(root / "memory.sqlite3"),
+                memory=store,
+                tools=ToolRegistry([]),
+                llm=llm,
+                agents_home=root / "home",
+                current_dir=root / "repo",
+                workspace_root=root / "repo",
+                enable_agents_update=False,
+                agents_md_maintenance=maintenance,
+            )
+            runtime_ref["runtime"] = runtime
+
+            runtime.run_turn("你好")
+
+        self.assertEqual(maintenance.contexts, [])
+
+    def test_runtime_calls_agents_maintenance_after_history_is_updated(self) -> None:
+        """防止 Runtime 在 Task History 或短期历史更新前就执行 prompt 维护。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = MemoryStore(root / "memory.sqlite3")
+            llm = FakeLLMClient([LLMResponse(content="收到。")])
+            runtime_ref = {}
+            maintenance = RecordingAgentsMdMaintenance(store, lambda: runtime_ref["runtime"])
+            runtime = AgentRuntime(
+                settings=self.make_settings(root / "memory.sqlite3"),
+                memory=store,
+                tools=ToolRegistry([]),
+                llm=llm,
+                agents_home=root / "home",
+                current_dir=root / "repo",
+                workspace_root=root / "repo",
+                enable_agents_update=True,
+                agents_md_maintenance=maintenance,
+            )
+            runtime_ref["runtime"] = runtime
+
+            runtime.run_turn("你好")
+
+        self.assertEqual(len(maintenance.contexts), 1)
+        self.assertEqual(maintenance.contexts[0].user_input, "你好")
+        self.assertEqual(maintenance.contexts[0].final_response, "收到。")
+        self.assertEqual(maintenance.history_counts_at_call, [1])
+        self.assertEqual(maintenance.conversation_lengths_at_call, [2])
 
     def test_runtime_writes_agents_update_to_global_agents_md_without_user_confirmation(self) -> None:
         """防止长期偏好写入流程暴露额外确认细节给用户。"""

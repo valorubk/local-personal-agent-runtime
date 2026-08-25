@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import json
 import re
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, TypedDict
+from typing import Any, Protocol, TypedDict
 
 from langgraph.graph import END, StateGraph
 
 from personal_agent.agent.llm import LLMClient, LLMResponse, OpenAILLMClient
+from personal_agent.agent.maintenance import AgentsMdMaintenanceService, PostTurnMaintenanceContext
 from personal_agent.config import Settings
 from personal_agent.memory.store import MemoryStore
-from personal_agent.prompt_profile import AGENTS_FILENAME, build_agents_prompt, replace_managed_preferences
+from personal_agent.prompt_profile import build_agents_prompt
 from personal_agent.text import sanitize_text_for_runtime
 from personal_agent.tools.base import ToolResult
 from personal_agent.tools.registry import ToolRegistry
@@ -23,36 +23,6 @@ SYSTEM_PROMPT = """你是 Babyface，一个本地优先的个人 Agent Runtime�
 当用户明确要求你记住长期个人信息时，在回答中说明你会保存该信息。
 如果不同 AGENTS.md 之间存在冲突，后出现的、更靠近当前工作目录的指令优先。
 不得删除、改写或总结任何 AGENTS.md 内容。"""
-
-
-AGENTS_UPDATE_JUDGE_PROMPT = """你负责判断本轮 Babyface 任务是否产生了值得写入 AGENTS.md 的长期用户偏好。
-请只提取稳定、长期、可复用的偏好或工作方式，不记录一次性任务内容，不记录敏感信息。
-如果不确定，返回 should_update=false。
-每轮最多返回一条候选规则。
-用户明确使用“记住”“以后”“每次”“一定要”等表达长期回复方式或工作偏好时，应倾向于返回 should_update=true。
-默认 target 使用 global；只有用户明确要求写入当前项目或当前目录时，target 才能使用 project 或 current。
-必须只返回 JSON，不要返回 Markdown。JSON 格式：
-{"should_update": false}
-或：
-{"should_update": true, "target": "global|project|current", "preference": "一条中文规则", "reason": "为什么这是长期偏好"}"""
-
-
-AGENTS_UPDATE_FORCED_EXTRACTION_PROMPT = f"""{AGENTS_UPDATE_JUDGE_PROMPT}
-
-这次用户输入中出现了明确的长期偏好表达。请重新判断并尽量抽取候选规则。
-除非该输入明显不是长期偏好，否则不要返回 should_update=false。"""
-
-
-AGENTS_CONFLICT_RESOLUTION_PROMPT = """你负责在写入单个 AGENTS.md 前整理 Babyface managed section。
-输入会包含目标 AGENTS.md 当前全文和一条候选规则。
-请判断候选规则是否与现有规则重复或冲突。
-如果冲突，请返回解决冲突后的 managed_preferences 列表，用新规则替换被冲突覆盖的旧规则。
-不要改写 managed section 之外的任何用户手写内容。
-必须只返回 JSON，不要返回 Markdown。JSON 格式：
-{"managed_preferences": ["规则一", "规则二"], "conflict_resolution": "简短说明"}"""
-
-
-AgentsUpdateTarget = Literal["global", "project", "current"]
 
 
 @dataclass(frozen=True)
@@ -101,33 +71,6 @@ class RuntimeResult:
     tool_results: list[ExecutedTool] = field(default_factory=list)
 
 
-@dataclass(frozen=True)
-class AgentsUpdateCandidate:
-    """LLM 对本轮任务是否需要更新 `AGENTS.md` 的结构化判断。
-
-    `target` 表示写入层级，`preference` 是候选规则正文，`reason` 用于记录
-    Babyface 为什么认为这条规则值得长期保存。
-    """
-
-    target: AgentsUpdateTarget
-    preference: str
-    reason: str
-
-
-@dataclass(frozen=True)
-class AgentsUpdateProposal:
-    """写入 `AGENTS.md` 前的内部更新提案。
-
-    Runtime 会先让 LLM 基于目标文件全文整理 managed section，再把整理后的
-    `resolved_preferences` 写回目标文件。该对象主要用于测试和后续审计扩展。
-    """
-
-    target_path: Path
-    candidate: AgentsUpdateCandidate
-    resolved_preferences: list[str]
-    conflict_resolution: str
-
-
 class RuntimeState(TypedDict, total=False):
     """LangGraph 中流动的状态对象。
 
@@ -144,6 +87,17 @@ class RuntimeState(TypedDict, total=False):
     tool_results: list[ExecutedTool]
     iterations: int
     final_response: str
+
+
+class AgentsMdMaintenanceRunner(Protocol):
+    """Runtime 依赖的 post-turn 维护端口。
+
+    Runtime 只知道维护服务可以接收一轮上下文并同步执行，不关心它内部如何
+    判断候选规则、整理冲突或写入 `AGENTS.md`。测试可用轻量 fake 实现该端口。
+    """
+
+    def run(self, context: PostTurnMaintenanceContext) -> object | None:
+        """执行一轮 post-turn 维护，返回值由具体服务自行定义。"""
 
 
 class AgentRuntime:
@@ -170,6 +124,7 @@ class AgentRuntime:
         current_dir: Path | None = None,
         workspace_root: Path | None = None,
         enable_agents_update: bool = False,
+        agents_md_maintenance: AgentsMdMaintenanceRunner | None = None,
     ) -> None:
         # settings 是启动时确定的配置，贯穿整个 Runtime 生命周期。
         self.settings = settings
@@ -189,6 +144,9 @@ class AgentRuntime:
         self.current_dir = current_dir
         self.workspace_root = workspace_root
         self.enable_agents_update = enable_agents_update
+        self.agents_md_maintenance = agents_md_maintenance
+        if self.agents_md_maintenance is None and self.enable_agents_update:
+            self.agents_md_maintenance = AgentsMdMaintenanceService(llm=self.llm)
 
         # 短期记忆：只存在于当前 AgentRuntime 实例，也就是当前 CLI Session。
         #
@@ -246,126 +204,29 @@ class AgentRuntime:
                 {"role": "assistant", "content": final_response},
             ]
         )
-        self._maybe_update_agents_md(safe_user_input, final_response)
+        self._run_post_turn_maintenance(safe_user_input, final_response)
         return RuntimeResult(final_response=final_response, stream=stream, tool_results=tool_results)
 
-    def _maybe_update_agents_md(self, user_input: str, final_response: str) -> None:
-        """在一轮任务完成后，按“LLM 候选 + 冲突整理”流程更新 `AGENTS.md`。
+    def _run_post_turn_maintenance(self, user_input: str, final_response: str) -> None:
+        """在一轮任务完成后调用可选的 `AGENTS.md` 维护服务。
 
-        Runtime 默认关闭该流程，避免单元测试、脚本或嵌入式调用意外改写用户目录。
-        真实 CLI 会显式开启，因此用户在正常 `babyface` 会话中可以获得自动学习效果。
+        Runtime 只负责确定调用时机：主 Agent Loop、Task History 保存和短期历史
+        更新都完成之后，才把本轮上下文交给维护服务。候选判断、冲突整理和文件
+        写入都属于维护服务自己的职责。
         """
 
-        if not self.enable_agents_update:
+        if not self.enable_agents_update or self.agents_md_maintenance is None:
             return
 
-        candidate = self._judge_agents_update_candidate(user_input, final_response)
-        if candidate is None:
-            if not _looks_like_explicit_agents_preference(user_input):
-                return
-            candidate = self._judge_agents_update_candidate(user_input, final_response, force_explicit=True)
-            if candidate is None:
-                return
-
-        target_path = self._resolve_agents_update_path(candidate.target)
-        proposal = self._resolve_agents_update_conflicts(target_path, candidate)
-        replace_managed_preferences(target_path, proposal.resolved_preferences)
-
-    def _judge_agents_update_candidate(
-        self,
-        user_input: str,
-        final_response: str,
-        force_explicit: bool = False,
-    ) -> AgentsUpdateCandidate | None:
-        """调用 LLM 判断本轮是否产生了可写入 `AGENTS.md` 的长期偏好。"""
-
-        messages = [
-            {
-                "role": "system",
-                "content": AGENTS_UPDATE_FORCED_EXTRACTION_PROMPT if force_explicit else AGENTS_UPDATE_JUDGE_PROMPT,
-            },
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "user_input": user_input,
-                        "final_response": final_response,
-                        "当前已加载的 AGENTS.md": build_agents_prompt(
-                            home=self.agents_home,
-                            current_dir=self.current_dir,
-                            workspace_root=self.workspace_root,
-                        ),
-                    },
-                    ensure_ascii=False,
-                ),
-            },
-        ]
-        response = self.llm.complete(messages, [])
-        data = _load_json_object(response.content)
-        if not data.get("should_update"):
-            return None
-
-        target = str(data.get("target") or "global")
-        if target not in {"global", "project", "current"}:
-            target = "global"
-        preference = sanitize_text_for_runtime(str(data.get("preference") or "")).strip()
-        if not preference:
-            return None
-        reason = sanitize_text_for_runtime(str(data.get("reason") or "LLM 判断这是长期偏好。")).strip()
-        return AgentsUpdateCandidate(
-            target=target,  # type: ignore[arg-type]
-            preference=preference,
-            reason=reason,
+        self.agents_md_maintenance.run(
+            PostTurnMaintenanceContext(
+                user_input=user_input,
+                final_response=final_response,
+                agents_home=self.agents_home,
+                current_dir=self.current_dir,
+                workspace_root=self.workspace_root,
+            )
         )
-
-    def _resolve_agents_update_conflicts(
-        self,
-        target_path: Path,
-        candidate: AgentsUpdateCandidate,
-    ) -> AgentsUpdateProposal:
-        """调用 LLM 整理目标文件 managed section，生成内部写入提案。"""
-
-        current_content = target_path.read_text(encoding="utf-8") if target_path.exists() else ""
-        messages = [
-            {"role": "system", "content": AGENTS_CONFLICT_RESOLUTION_PROMPT},
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "target_path": str(target_path),
-                        "current_agents_md": current_content,
-                        "candidate_preference": candidate.preference,
-                    },
-                    ensure_ascii=False,
-                ),
-            },
-        ]
-        response = self.llm.complete(messages, [])
-        data = _load_json_object(response.content)
-        raw_preferences = data.get("managed_preferences")
-        if isinstance(raw_preferences, list):
-            resolved = [sanitize_text_for_runtime(str(item)).strip() for item in raw_preferences if str(item).strip()]
-        else:
-            resolved = [candidate.preference]
-        conflict_resolution = sanitize_text_for_runtime(str(data.get("conflict_resolution") or "")).strip()
-        return AgentsUpdateProposal(
-            target_path=target_path,
-            candidate=candidate,
-            resolved_preferences=resolved,
-            conflict_resolution=conflict_resolution,
-        )
-
-    def _resolve_agents_update_path(self, target: AgentsUpdateTarget) -> Path:
-        """根据 LLM 给出的目标层级，解析实际要写入的 `AGENTS.md` 路径。"""
-
-        home = self.agents_home or Path(os.environ.get("HOME", str(Path.home())))
-        if target == "project":
-            root = self.workspace_root or self.current_dir or Path.cwd()
-            return root / AGENTS_FILENAME
-        if target == "current":
-            current = self.current_dir or Path.cwd()
-            return current / AGENTS_FILENAME
-        return home / ".babyface" / AGENTS_FILENAME
 
     def _build_workflow(self):
         """创建 LangGraph 工作流。
@@ -605,34 +466,3 @@ def _clean_memory_value(value: str) -> str | None:
     cleaned = value.strip(" ：:，,。！!？?\t\n")
     return cleaned or None
 
-
-def _load_json_object(content: str) -> dict[str, Any]:
-    """把 LLM 输出解析成 JSON 对象，解析失败时返回空对象。
-
-    这两个 AGENTS.md 辅助判断都是“附加流程”。即使模型偶尔返回了非 JSON，
-    也不应该影响本轮用户任务的最终回答、历史保存和后续对话。
-    """
-
-    try:
-        data = json.loads(content)
-    except json.JSONDecodeError:
-        return {}
-    if isinstance(data, dict):
-        return data
-    return {}
-
-
-def _looks_like_explicit_agents_preference(user_input: str) -> bool:
-    """判断用户是否显式表达了希望长期改变 Babyface 行为。
-
-    这个判断不是为了直接写入规则，而是给 LLM 偏好抽取做兜底重试：
-    当第一轮 LLM 过于保守返回 false 时，明确的“记住/以后/每次/一定要”
-    这类表达不应该被静默吞掉。
-    """
-
-    text = user_input.strip()
-    if not text:
-        return False
-    has_memory_verb = any(keyword in text for keyword in ("记住", "以后", "后续", "每次", "一定要", "固定"))
-    has_behavior_target = any(keyword in text for keyword in ("回复", "回答", "跟我", "对话", "工作", "风格", "偏好"))
-    return has_memory_verb and has_behavior_target
