@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import os
 from pathlib import Path
 
 from personal_agent.config import ConfigError, load_settings
@@ -31,7 +32,13 @@ class ConfigTests(unittest.TestCase):
     def test_default_memory_path_uses_memory_directory(self) -> None:
         """防止默认 SQLite 文件继续堆在 `.babyface` 根目录。"""
 
-        settings = load_settings(env={"OPENAI_API_KEY": "test-key"})
+        old_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                settings = load_settings(env={"OPENAI_API_KEY": "test-key"})
+            finally:
+                os.chdir(old_cwd)
 
         self.assertEqual(settings.memory_db_path, Path(".babyface/memory/memory.sqlite3"))
         self.assertIsNone(settings.mcp_config_path)

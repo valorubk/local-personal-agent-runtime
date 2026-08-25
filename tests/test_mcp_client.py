@@ -33,6 +33,11 @@ class FakeMcpClient:
         self.closed = True
 
 
+class FailingCloseMcpClient(FakeMcpClient):
+    def close(self) -> None:
+        raise RuntimeError("close boom")
+
+
 class McpClientTests(unittest.TestCase):
     def test_manager_registers_enabled_stdio_server_tools(self) -> None:
         """防止已启用 MCP Server 的工具没有暴露给 Agent。"""
@@ -117,6 +122,19 @@ class McpClientTests(unittest.TestCase):
         manager.close()
 
         self.assertTrue(fake_client.closed)
+
+    def test_manager_close_does_not_raise_when_client_close_fails(self) -> None:
+        """防止 MCP SDK 关闭外部连接失败时导致 CLI 退出崩溃。"""
+
+        manager = McpServerManager(
+            [McpServerConfig(name="weather", transport="stdio", command="python")],
+            client_factory=lambda config: FailingCloseMcpClient(),
+        )
+
+        manager.start()
+        manager.close()
+
+        self.assertIn("关闭失败", manager.startup_errors[-1])
 
     def test_tool_registry_rejects_duplicate_tool_names(self) -> None:
         """防止同名 Tool 静默覆盖，导致 LLM 调用到错误工具。"""

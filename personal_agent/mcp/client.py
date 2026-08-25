@@ -161,7 +161,10 @@ class McpServerManager:
         """关闭所有已启动的 MCP Client。"""
 
         for client in reversed(self._clients):
-            client.close()
+            try:
+                client.close()
+            except Exception as exc:  # noqa: BLE001 - 关闭失败不能影响 CLI 退出
+                self.startup_errors.append(f"MCP Server 关闭失败：{exc}")
         self._clients.clear()
 
 

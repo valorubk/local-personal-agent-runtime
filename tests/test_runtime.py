@@ -142,6 +142,27 @@ class AgentRuntimeTests(unittest.TestCase):
             self.assertTrue(result.tool_results[0].result.ok)
             self.assertIn("工具结果", str(llm.messages_seen[-1]))
 
+    def test_system_prompt_tells_model_to_use_tools_or_ask_for_missing_arguments(self) -> None:
+        """防止模型在天气等实时信息场景中不调用工具也不追问必要参数。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MemoryStore(Path(tmp) / "memory.sqlite3")
+            llm = FakeLLMClient([LLMResponse(content="你想查哪个城市？")])
+            runtime = AgentRuntime(
+                settings=self.make_settings(Path(tmp) / "memory.sqlite3"),
+                memory=store,
+                tools=ToolRegistry([EchoTool()]),
+                llm=llm,
+            )
+
+            runtime.run_turn("今天天气怎么样")
+
+        system_prompt = llm.messages_seen[0][0]["content"]
+        self.assertIn("实时信息", system_prompt)
+        self.assertIn("优先调用工具", system_prompt)
+        self.assertIn("必要参数", system_prompt)
+        self.assertIn("追问", system_prompt)
+
     def test_debug_trace_records_session_and_distinct_trace_ids_across_turns(self) -> None:
         """防止调试链路无法按同一 Session 下的不同对话轮次回溯。"""
 
