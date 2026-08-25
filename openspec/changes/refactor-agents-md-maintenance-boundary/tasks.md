@@ -15,6 +15,7 @@
 - [ ] 2.4 将候选判断 prompt、强制抽取 prompt、冲突整理 prompt 迁移到维护模块
 - [ ] 2.5 将 JSON 解析、明确偏好启发式判断、目标路径解析迁移到维护模块
 - [ ] 2.6 在维护服务中复用 `build_agents_prompt()` 和 `replace_managed_preferences()`，避免复制确定性文件处理逻辑
+- [ ] 2.7 保持维护服务当前为同步 `run(context)` 接口，不引入异步 worker，同时避免 Runtime 依赖服务内部实现细节
 
 ## 3. Runtime 编排改造
 
@@ -23,6 +24,7 @@
 - [ ] 3.3 删除 Runtime 中的 `AGENTS.md` 候选判断、冲突整理、JSON 解析和 managed section 写入细节方法
 - [ ] 3.4 保持 LangGraph 节点结构不变，确认 maintenance 不进入主 Agent Loop
 - [ ] 3.5 保持 CLI 入口行为不变，继续通过 `enable_agents_update=True` 开启自动写入流程
+- [ ] 3.6 确认 Runtime 不引入后台任务、退出等待或并发写入管理逻辑，为未来异步化保留在 service 内部演进的空间
 
 ## 4. 验证与收尾
 

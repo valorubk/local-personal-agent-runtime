@@ -11,12 +11,13 @@
 - 让 `AgentRuntime` 只负责任务执行编排：清洗输入、显式 Memory 保存、运行 LangGraph、生成 stream、保存 Task History、更新短期历史、调用 post-turn maintenance。
 - 新增 `AgentsMdMaintenanceService`，集中管理 `AGENTS.md` 自动更新细节，并提供清晰的输入上下文和输出结果。
 - 保持现有自动写入行为：不新增用户确认；无候选规则时不写入；有候选规则时按目标层级写入 managed section。
+- 当前版本保持同步 post-turn maintenance，避免引入后台队列、并发写入和 CLI 退出等待语义。
 - 保持现有安全边界：多层 `AGENTS.md` 拼接不做 LLM 合并；LLM 只整理单个目标文件的 managed section；写入函数只替换 managed section。
 - 让测试能清楚区分 Runtime 编排责任与 maintenance 服务责任。
 
 **Non-Goals:**
 
-- 不实现独立 Agent、Multi-Agent、后台 Scheduler 或异步队列。
+- 不实现独立 Agent、Multi-Agent、后台 Scheduler、异步队列或后台 worker 生命周期管理。
 - 不改变 `AGENTS.md` 的发现顺序、拼接格式、managed section 标记格式或默认写入目标。
 - 不改变 Shell Tool 二次确认逻辑；本次维护服务不复用 Shell Tool 的确认机制。
 - 不改变 SQLite Memory 的存储位置、表结构或 Task History 写入时机。
@@ -74,11 +75,22 @@ V1 不把该结果展示给用户，也不要求用户确认。`AgentRuntime.run
 
 维护服务只编排这些确定性工具和 LLM 判断，不复制 managed section 字符串处理逻辑。这样安全边界集中在一个低层模块中，service 层只决定“写哪些规则到哪个目标文件”。
 
+### 6. 当前保持同步执行，但接口预留异步演进空间
+
+`AgentsMdMaintenanceService` 的逻辑天然可以后台化，因为它发生在主回答生成之后，不参与本轮用户请求的理解、工具调用和最终回答生成。但 V1 不直接异步执行，原因是异步化会额外引入三类复杂度：
+
+1. 连续多轮对话时，上一轮维护任务可能尚未写入，下一轮已经读取 system prompt，导致用户以为偏好已经沉淀但下一轮尚未生效。
+2. 多个后台维护任务可能同时读写同一个 `AGENTS.md`，需要文件锁、串行队列或版本检查，否则可能出现后写覆盖先写。
+3. CLI 退出时需要定义是否等待后台任务完成、失败如何记录、是否影响退出体验，这些都超出当前 V1 边界。
+
+因此当前实现采用同步 `run(context)`：Runtime 在 Task History 和短期历史都完成后调用它，维护流程完成后本轮 `run_turn()` 才返回。接口保持在 context/result 边界上，未来可以把服务内部替换为串行队列或 Steward Agent，而不把异步细节泄漏回 Runtime。
+
 ## Risks / Trade-offs
 
 - Runtime 测试如果继续断言写入细节，会掩盖边界调整是否成功 → 拆分测试：Runtime 只验证 post-turn 调用时机和禁用开关；维护服务测试验证候选、冲突整理、目标解析和写入。
 - 服务抽离后依赖注入对象增多，初始化路径可能变复杂 → 默认构造 `AgentsMdMaintenanceService(llm=self.llm, ...)`，测试可显式注入 fake service。
 - post-turn maintenance 失败可能影响用户主流程 → 保持现有容错原则：LLM 非 JSON 时跳过；如果写入路径或文件操作异常，本次任务主回答、Task History 和短期历史已经完成。实现阶段需要决定是否吞掉所有维护异常或仅保持现状；倾向于让维护流程自身尽量容错，不扩大主流程失败面。
+- 同步维护会让一轮 `run_turn()` 在主回答生成后多等待维护 LLM 调用 → 这是当前 V1 为换取确定写入顺序、简单测试和清晰退出语义接受的成本；后续如体验上明显变慢，再通过同一 service 接口演进为串行异步队列。
 - 未来升级为独立 Steward Agent 时，当前同步接口可能需要演进 → 先用清晰 context/result 边界隔离 Runtime，后续可把 service 内部实现替换为 Agent，而不改变 Runtime 调用位置。
 
 ## Migration Plan
