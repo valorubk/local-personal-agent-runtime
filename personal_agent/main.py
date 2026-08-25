@@ -27,7 +27,10 @@ from personal_agent.debug_trace import DebugTraceRecorder, DebugTraceStore, Null
 from personal_agent.memory.store import MemoryStore
 from personal_agent.mcp.client import McpServerManager
 from personal_agent.mcp.config import load_mcp_servers
+from personal_agent.tools.app_tool import AppOpenTool
 from personal_agent.tools.file_tool import FileTool
+from personal_agent.tools.http_tool import HttpRequestTool
+from personal_agent.tools.os_config_tool import OSConfigTool
 from personal_agent.tools.registry import ToolRegistry
 from personal_agent.tools.shell_tool import ShellTool
 from personal_agent.tools.web_tool import WebTool
@@ -98,6 +101,9 @@ def _run(config: Optional[str] = None, debug: bool = False) -> None:
     # 注册 V1 支持的内置工具。未来新增内置工具只需要加到这个列表里。
     builtin_tools = [
         FileTool(),
+        OSConfigTool(),
+        AppOpenTool(),
+        HttpRequestTool(),
         ShellTool(timeout_seconds=settings.shell_timeout_seconds, confirm=confirm_shell),
         WebTool(),
     ]
