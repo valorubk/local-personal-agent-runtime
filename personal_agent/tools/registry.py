@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from personal_agent.config import ConfigError
 from personal_agent.tools.base import Tool, ToolResult
 
 
@@ -15,7 +16,11 @@ class ToolRegistry:
 
     def __init__(self, tools: Iterable[Tool]) -> None:
         # 用 name 建索引，方便 LLM 请求 `shell_exec` 时快速找到对应工具。
-        self._tools = {tool.name: tool for tool in tools}
+        self._tools: dict[str, Tool] = {}
+        for tool in tools:
+            if tool.name in self._tools:
+                raise ConfigError(f"重复 Tool 名称：{tool.name}")
+            self._tools[tool.name] = tool
 
     def list_openai_tools(self) -> list[dict]:
         """把所有工具转换成 OpenAI SDK 需要的 tools 参数。"""

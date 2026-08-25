@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 from personal_agent.agent.runtime import RuntimeResult
 from personal_agent.config import Settings
 from personal_agent.main import app
+from personal_agent.tools.base import ToolResult
 
 
 class MainCLITests(unittest.TestCase):
@@ -69,6 +70,70 @@ class MainCLITests(unittest.TestCase):
         self.assertNotIn("tool_before", result.stdout)
         self.assertNotIn("session_id=", result.stdout)
         self.assertNotIn("trace_id=", result.stdout)
+
+    def test_mcp_config_is_loaded_and_external_tools_are_registered(self) -> None:
+        """防止 CLI 启动时只注册内置 Tool，忽略 MCP 配置文件。"""
+
+        class FakeTool:
+            name = "weather__forecast"
+            description = "查询天气"
+
+            def to_openai_tool(self):
+                return {"type": "function", "function": {"name": self.name}}
+
+            def run(self, arguments):
+                return ToolResult(ok=True, content="晴")
+
+        class FakeManager:
+            startup_errors = ["MCP Server broken 启动失败：boom"]
+            closed = False
+
+            def __init__(self, configs):
+                self.configs = configs
+
+            def start(self):
+                return None
+
+            def tools(self):
+                return [FakeTool()]
+
+            def close(self):
+                FakeManager.closed = True
+
+        class FakeRuntime:
+            tool_names = []
+
+            def __init__(self, **kwargs):
+                FakeRuntime.tool_names = kwargs["tools"].names()
+
+            def run_turn(self, user_input):
+                return RuntimeResult(final_response=f"收到：{user_input}", stream=[f"收到：{user_input}"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings = Settings(
+                openai_api_key="test-key",
+                openai_base_url=None,
+                openai_model="test-model",
+                memory_db_path=root / "memory.sqlite3",
+                shell_timeout_seconds=3,
+                mcp_config_path=root / "mcp.json",
+            )
+            inputs = iter(["/exit"])
+            runner = CliRunner()
+            with (
+                patch("personal_agent.main.load_settings", return_value=settings),
+                patch("personal_agent.main.load_mcp_servers", return_value=[object()], create=True),
+                patch("personal_agent.main.McpServerManager", FakeManager, create=True),
+                patch("personal_agent.main.AgentRuntime", FakeRuntime),
+                patch("personal_agent.main.create_prompt_reader", return_value=lambda prompt: next(inputs)),
+            ):
+                result = runner.invoke(app, [])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("weather__forecast", FakeRuntime.tool_names)
+        self.assertIn("MCP Server broken 启动失败：boom", result.stdout)
+        self.assertTrue(FakeManager.closed)
 
 
 if __name__ == "__main__":

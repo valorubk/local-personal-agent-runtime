@@ -25,6 +25,8 @@ from personal_agent.cli.prompt_input import create_prompt_reader
 from personal_agent.config import ConfigError, load_settings
 from personal_agent.debug_trace import DebugTraceRecorder, DebugTraceStore, NullDebugTraceRecorder
 from personal_agent.memory.store import MemoryStore
+from personal_agent.mcp.client import McpServerManager
+from personal_agent.mcp.config import load_mcp_servers
 from personal_agent.tools.file_tool import FileTool
 from personal_agent.tools.registry import ToolRegistry
 from personal_agent.tools.shell_tool import ShellTool
@@ -93,14 +95,31 @@ def _run(config: Optional[str] = None, debug: bool = False) -> None:
     # MemoryStore 启动时会自动创建 SQLite 文件和表。
     memory = MemoryStore(settings.memory_db_path)
 
-    # 注册 V1 支持的三个工具。未来新增工具只需要加到这个列表里。
-    tools = ToolRegistry(
-        [
-            FileTool(),
-            ShellTool(timeout_seconds=settings.shell_timeout_seconds, confirm=confirm_shell),
-            WebTool(),
-        ]
-    )
+    # 注册 V1 支持的内置工具。未来新增内置工具只需要加到这个列表里。
+    builtin_tools = [
+        FileTool(),
+        ShellTool(timeout_seconds=settings.shell_timeout_seconds, confirm=confirm_shell),
+        WebTool(),
+    ]
+
+    mcp_manager: McpServerManager | None = None
+    try:
+        mcp_configs = load_mcp_servers(settings.mcp_config_path)
+        mcp_manager = McpServerManager(mcp_configs)
+        mcp_manager.start()
+    except ConfigError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    for error in mcp_manager.startup_errors:
+        console.print(f"[yellow]{error}[/yellow]")
+
+    try:
+        tools = ToolRegistry([*builtin_tools, *mcp_manager.tools()])
+    except ConfigError as exc:
+        mcp_manager.close()
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
 
     # Runtime 是 Agent 的核心；CLI 只负责输入输出，不关心 LangGraph 细节。
     runtime = AgentRuntime(
@@ -121,37 +140,49 @@ def _run(config: Optional[str] = None, debug: bool = False) -> None:
 
     console.print(build_startup_banner(debug=debug))
     read_user_input = create_prompt_reader()
-    while True:
-        # Prompt reader 会把 `> ` 作为不可编辑提示符传给输入库，
-        # 用户无法通过退格键删掉提示符，只能编辑提示符后面的内容。
-        user_input = read_user_input("> ").strip()
-        if not user_input:
-            continue
-        if user_input in {"exit", "quit", "/exit"}:
-            console.print("再见。")
-            return
+    try:
+        while True:
+            # Prompt reader 会把 `> ` 作为不可编辑提示符传给输入库，
+            # 用户无法通过退格键删掉提示符，只能编辑提示符后面的内容。
+            user_input = read_user_input("> ").strip()
+            if not user_input:
+                continue
+            if user_input in {"exit", "quit", "/exit"}:
+                console.print("再见。")
+                return
 
-        try:
-            result = runtime.run_turn(user_input)
-        except Exception as exc:
-            # 不把 Python traceback 直接展示给用户。
-            # 如果能识别错误类型，`format_runtime_error` 会给出更具体说明；
-            # 否则统一显示“系统异常”，并让 Session 继续可用。
-            console.print(f"[red]{format_runtime_error(exc)}[/red]")
-            continue
-        for executed in result.tool_results:
-            # Tool 调用过程必须可见，这是 Claude Code 风格 CLI 的关键体验之一。
-            status = "成功" if executed.result.ok else "失败"
-            console.print(f"[cyan]Tool[/cyan] {executed.name} {status}")
-            if executed.result.error:
-                console.print(f"[red]{executed.result.error}[/red]")
-        console.print()
-        console.print("[bold]Babyface:[/bold]")
+            try:
+                result = runtime.run_turn(user_input)
+            except Exception as exc:
+                # 不把 Python traceback 直接展示给用户。
+                # 如果能识别错误类型，`format_runtime_error` 会给出更具体说明；
+                # 否则统一显示“系统异常”，并让 Session 继续可用。
+                console.print(f"[red]{format_runtime_error(exc)}[/red]")
+                continue
+            for executed in result.tool_results:
+                # Tool 调用过程必须可见，这是 Claude Code 风格 CLI 的关键体验之一。
+                status = "成功" if executed.result.ok else "失败"
+                source = _format_tool_source(executed.result.metadata)
+                console.print(f"[cyan]Tool[/cyan] {executed.name} {status}{source}")
+                if executed.result.error:
+                    console.print(f"[red]{executed.result.error}[/red]")
+            console.print()
+            console.print("[bold]Babyface:[/bold]")
 
-        # Runtime 返回 stream 片段。这里先拼成 Markdown 渲染；
-        # 如果后续要做真正逐 token 展示，可以在这里改成 Live/Console.print 分片输出。
-        console.print(Markdown("".join(result.stream)))
-        console.print()
+            # Runtime 返回 stream 片段。这里先拼成 Markdown 渲染；
+            # 如果后续要做真正逐 token 展示，可以在这里改成 Live/Console.print 分片输出。
+            console.print(Markdown("".join(result.stream)))
+            console.print()
+    finally:
+        mcp_manager.close()
+
+
+def _format_tool_source(metadata: dict) -> str:
+    """返回安全的 Tool 来源展示后缀。"""
+
+    if metadata.get("source") == "mcp" and metadata.get("server"):
+        return f" (MCP: {metadata['server']})"
+    return ""
 
 
 if typer is not None:
