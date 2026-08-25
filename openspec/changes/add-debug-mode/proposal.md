@@ -5,8 +5,8 @@ Babyface 目前可以执行交互式 Agent Loop，但当 LLM、Tool、Skill 或�
 ## What Changes
 
 - 为 `babyface` CLI 新增 `--debug` 参数；用户运行 `babyface --debug` 时进入调试模式，未传入该参数时保持现有普通交互体验。
-- 在每次启动 Babyface 交互式 Session 时生成唯一 `Session ID`，同一进程内所有对话轮次共享该 ID。
-- 在每次用户与 Babyface 对话时生成唯一 `Trace ID`，用于关联该轮对话中的用户输入、LLM 调用、Tool 调用、Skill 调用和最终输出。
+- 在每次启动 Babyface 交互式 Session 时生成唯一 `session_id`，同一进程内所有对话轮次共享该 ID。
+- 在每次用户与 Babyface 对话时生成唯一 `trace_id`，用于关联该轮对话中的用户输入、LLM 调用、Tool 调用、Skill 调用和最终输出。
 - 调试模式下，Agent 内部调用链路的每个关键阶段都向命令行打印调试记录，至少覆盖接受用户输入后、LLM 调用前、LLM 调用后、Tool 调用前、Tool 调用后、Skill 调用前和 Skill 调用后。
 - 调试模式下，Agent 内部调用链路的每个关键阶段都持久化到本地 SQLite 文件；文件按日期分隔，名称格式为 `debug_trace_YYYYMMDD`，例如 `debug_trace_20260825` 仅保存 2026 年 8 月 25 日的调试记录。
 - 调试记录类型至少覆盖用户信息、LLM 信息、工具调用和 Skill 调用。
@@ -21,7 +21,7 @@ Babyface 目前可以执行交互式 Agent Loop，但当 LLM、Tool、Skill 或�
 
 ### Modified Capabilities
 
-- `personal-agent-runtime`: 新增 Babyface 调试模式的启动参数、`Session ID`/`Trace ID` 生成、命令行调试输出和按日期 SQLite 持久化行为。
+- `personal-agent-runtime`: 新增 Babyface 调试模式的启动参数、`session_id`/`trace_id` 生成、命令行调试输出和按日期 SQLite 持久化行为。
 
 ## Impact
 

@@ -9,8 +9,8 @@
 **Goals:**
 
 - `babyface --debug` 显式开启调试模式，普通 `babyface` 保持现有输出和持久化行为。
-- 每次 CLI Session 生成一个 `Session ID`，每轮 `run_turn()` 生成一个 `Trace ID`。
-- 调试事件覆盖接受用户输入后、LLM 调用前后、Tool 调用前后、Skill 调用前后，并统一包含输入、输出、`Session ID`、`Trace ID`、系统时间。
+- 每次 CLI Session 生成一个 `session_id`，每轮 `run_turn()` 生成一个 `trace_id`。
+- 调试事件覆盖接受用户输入后、LLM 调用前后、Tool 调用前后、Skill 调用前后，并统一包含输入、输出、`session_id`、`trace_id`、系统时间。
 - 调试事件同时输出到命令行和写入当天 SQLite 文件。
 - 调试持久化失败时只影响调试记录，不导致 Agent Session 崩溃。
 
@@ -36,7 +36,7 @@
 调试采集采用类似切面的方式：业务流程只在稳定边界调用 recorder 的通用接口，例如 `record_user_input()`、`around_llm_call()`、`around_tool_call()`、`around_skill_call()` 或等价的前后置 helper。helper 内部统一负责：
 
 1. 组装 before/after 调试事件。
-2. 补充 `Session ID`、`Trace ID`、系统时间和阶段名称。
+2. 补充 `session_id`、`trace_id`、系统时间和阶段名称。
 3. 格式化命令行输出。
 4. 写入当天 SQLite。
 5. 捕获调试持久化失败并转成友好提示。
@@ -57,9 +57,11 @@
 
 备选方案是复用 MemoryStore 当前的 UTC ISO 字符串。它更利于跨时区计算，但不符合用户明确给出的展示格式，因此调试记录单独使用本地格式。
 
-### 5. ID 生成使用 UUID 字符串
+### 5. ID 生成使用 UUID 字符串且字段名固定
 
-`Session ID` 和 `Trace ID` 使用 UUID 字符串。CLI 启动交互式 Session 时生成 `Session ID`，并把它注入 Runtime 或 Debug Context；Runtime 每次 `run_turn()` 开始时生成 `Trace ID`，并放入 LangGraph state，供 `_prepare`、`_call_llm`、`_run_tools`、`_finalize` 和 post-turn Skill 维护链路复用。
+`session_id` 和 `trace_id` 使用 UUID 字符串。CLI 启动交互式 Session 时生成 `session_id`，并把它注入 Runtime 或 Debug Context；Runtime 每次 `run_turn()` 开始时生成 `trace_id`，并放入 LangGraph state，供 `_prepare`、`_call_llm`、`_run_tools`、`_finalize` 和 post-turn Skill 维护链路复用。
+
+所有调试事件模型、命令行格式化字段和 SQLite schema 都使用蛇形字段名 `session_id` 和 `trace_id`。面向用户的说明可以描述为 Session ID 和 Trace ID，但结构化字段不得使用 `Session ID`、`Trace ID`、`sessionId` 或 `traceId`。
 
 使用 UUID 的好处是无需依赖数据库自增 ID，也不要求跨进程共享状态。备选方案是时间戳加随机数，可读性略好但冲突处理更脆弱。
 
