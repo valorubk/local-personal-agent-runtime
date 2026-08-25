@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from personal_agent.agent.runtime import AgentRuntime, RuntimeResult
 from personal_agent.cli.errors import format_runtime_error
+from personal_agent.debug_trace import DebugRecorder, NullDebugTraceRecorder
 
 
 EXIT_COMMANDS = {"exit", "quit", "/exit"}
@@ -23,8 +24,10 @@ class CLISession:
         *,
         read_input: Callable[[str], str] = input,
         write: Callable[[str], None] = print,
+        debug_recorder: DebugRecorder | None = None,
     ) -> None:
         self.runtime = runtime
+        self.debug_recorder = debug_recorder or NullDebugTraceRecorder()
 
         # 依赖注入：默认用 input/print，测试时可以传 lambda/list.append。
         self.read_input = read_input

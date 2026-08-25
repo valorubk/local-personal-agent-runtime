@@ -173,6 +173,28 @@ quit
 
 每轮回复会在 `Babyface:` 标签前后保留空行，让回复内容和下一轮输入提示保持间距。
 
+## 调试模式
+
+需要排查 Agent 内部调用链路时，可以使用：
+
+```bash
+babyface --debug
+```
+
+调试模式会把用户输入后、LLM 调用前后、Tool 调用前后、Skill 调用前后的链路记录写入本地 SQLite。调试记录默认保存在：
+
+```text
+.babyface/debug/debug_trace_YYYYMMDD
+```
+
+例如 2026 年 8 月 25 日的记录会写入：
+
+```text
+.babyface/debug/debug_trace_20260825
+```
+
+调试模式不会把调用链路记录打印到命令行；终端仍只展示正常的 Babyface 对话输出、Tool 状态和必要错误提示。调试记录可能包含用户输入、LLM 输入输出、Tool 结果和 Skill 上下文，请只在可信本地环境中开启，并按需要清理 `.babyface/debug/` 下的文件。
+
 ## Shell Tool 二次确认
 
 当 Agent 请求执行 shell 命令时，CLI 会先展示命令并询问是否允许执行。
