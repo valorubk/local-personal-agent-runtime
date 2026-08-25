@@ -5,12 +5,14 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, TypedDict
+from uuid import uuid4
 
 from langgraph.graph import END, StateGraph
 
 from personal_agent.agent.llm import LLMClient, LLMResponse, OpenAILLMClient
 from personal_agent.agent.maintenance import AgentsMdMaintenanceService, PostTurnMaintenanceContext
 from personal_agent.config import Settings
+from personal_agent.debug_trace import DebugRecorder, NullDebugTraceRecorder
 from personal_agent.memory.store import MemoryStore
 from personal_agent.prompt_profile import build_agents_prompt
 from personal_agent.text import sanitize_text_for_runtime
@@ -87,6 +89,7 @@ class RuntimeState(TypedDict, total=False):
     tool_results: list[ExecutedTool]
     iterations: int
     final_response: str
+    trace_id: str
 
 
 class AgentsMdMaintenanceRunner(Protocol):
@@ -125,6 +128,7 @@ class AgentRuntime:
         workspace_root: Path | None = None,
         enable_agents_update: bool = False,
         agents_md_maintenance: AgentsMdMaintenanceRunner | None = None,
+        debug_recorder: DebugRecorder | None = None,
     ) -> None:
         # settings 是启动时确定的配置，贯穿整个 Runtime 生命周期。
         self.settings = settings
@@ -147,6 +151,7 @@ class AgentRuntime:
         self.agents_md_maintenance = agents_md_maintenance
         if self.agents_md_maintenance is None and self.enable_agents_update:
             self.agents_md_maintenance = AgentsMdMaintenanceService(llm=self.llm)
+        self.debug_recorder: DebugRecorder = debug_recorder or NullDebugTraceRecorder()
 
         # 短期记忆：只存在于当前 AgentRuntime 实例，也就是当前 CLI Session。
         #
@@ -171,6 +176,16 @@ class AgentRuntime:
         # 先清洗输入，确保后续写 SQLite、拼 messages、调用 LLM 时都是合法文本。
         # 这一步会把无法 UTF-8 编码的 surrogate 字符替换为 `�`。
         safe_user_input = sanitize_text_for_runtime(user_input)
+        trace_id = str(uuid4())
+        self.debug_recorder.record(
+            event_type="user",
+            stage="user_input_received",
+            name="user_input",
+            input_data=safe_user_input,
+            output_data="",
+            metadata={},
+            trace_id=trace_id,
+        )
 
         # V1 用非常简单的规则支持显式长期记忆：用户输入“记住：...”就保存。
         # 更完整的 Memory 抽取可以后续交给模型判断。
@@ -181,6 +196,7 @@ class AgentRuntime:
             "user_input": safe_user_input,
             "tool_results": [],
             "iterations": 0,
+            "trace_id": trace_id,
         }
         state = self.workflow.invoke(initial_state)
         final_response = sanitize_text_for_runtime(str(state.get("final_response", "")))
@@ -194,6 +210,8 @@ class AgentRuntime:
             user_input=safe_user_input,
             final_response=final_response,
             tool_calls=[tool.as_history_item() for tool in tool_results],
+            session_id=self.debug_recorder.session_id or None,
+            trace_id=trace_id,
         )
 
         # 一轮完成后，把“用户问题 + Agent 最终回答”加入短期记忆。
@@ -204,10 +222,10 @@ class AgentRuntime:
                 {"role": "assistant", "content": final_response},
             ]
         )
-        self._run_post_turn_maintenance(safe_user_input, final_response)
+        self._run_post_turn_maintenance(safe_user_input, final_response, trace_id)
         return RuntimeResult(final_response=final_response, stream=stream, tool_results=tool_results)
 
-    def _run_post_turn_maintenance(self, user_input: str, final_response: str) -> None:
+    def _run_post_turn_maintenance(self, user_input: str, final_response: str, trace_id: str) -> None:
         """在一轮任务完成后调用可选的 `AGENTS.md` 维护服务。
 
         Runtime 只负责确定调用时机：主 Agent Loop、Task History 保存和短期历史
@@ -218,14 +236,26 @@ class AgentRuntime:
         if not self.enable_agents_update or self.agents_md_maintenance is None:
             return
 
-        self.agents_md_maintenance.run(
-            PostTurnMaintenanceContext(
-                user_input=user_input,
-                final_response=final_response,
-                agents_home=self.agents_home,
-                current_dir=self.current_dir,
-                workspace_root=self.workspace_root,
-            )
+        context = PostTurnMaintenanceContext(
+            user_input=user_input,
+            final_response=final_response,
+            agents_home=self.agents_home,
+            current_dir=self.current_dir,
+            workspace_root=self.workspace_root,
+        )
+        self.debug_recorder.around_skill_call(
+            trace_id=trace_id,
+            name="agents_md_maintenance",
+            input_data={
+                "user_input": user_input,
+                "final_response": final_response,
+                "agents_home": self.agents_home,
+                "current_dir": self.current_dir,
+                "workspace_root": self.workspace_root,
+            },
+            metadata={"skill": "agents_md_maintenance"},
+            call=lambda: self.agents_md_maintenance.run(context),  # type: ignore[union-attr]
+            output_builder=lambda result: {"result": result},
         )
 
     def _build_workflow(self):
@@ -322,7 +352,24 @@ class AgentRuntime:
         如果模型直接回答，response.content 就是最终候选回答。
         """
 
-        response = self.llm.complete(state["messages"], self.tools.list_openai_tools())
+        openai_tools = self.tools.list_openai_tools()
+        response = self.debug_recorder.around_llm_call(
+            trace_id=state["trace_id"],
+            name="complete",
+            input_data={
+                "messages": state["messages"],
+                "tools": openai_tools,
+            },
+            metadata={"model": self.settings.openai_model},
+            call=lambda: self.llm.complete(state["messages"], openai_tools),
+            output_builder=lambda result: {
+                "content": result.content,
+                "tool_calls": [
+                    {"id": call.id, "name": call.name, "arguments": call.arguments}
+                    for call in result.tool_calls
+                ],
+            },
+        )
         messages = list(state["messages"])
         assistant_message: dict[str, Any] = {"role": "assistant", "content": response.content}
         if response.tool_calls:
@@ -371,7 +418,19 @@ class AgentRuntime:
         messages = list(state["messages"])
         tool_results = list(state.get("tool_results", []))
         for call in response.tool_calls:
-            result = self.tools.run(call.name, call.arguments)
+            result = self.debug_recorder.around_tool_call(
+                trace_id=state["trace_id"],
+                name=call.name,
+                input_data=call.arguments,
+                metadata={"tool_call_id": call.id},
+                call=lambda call=call: self.tools.run(call.name, call.arguments),
+                output_builder=lambda tool_result: {
+                    "ok": tool_result.ok,
+                    "content": tool_result.content,
+                    "error": tool_result.error,
+                    "metadata": tool_result.metadata,
+                },
+            )
             executed = ExecutedTool(
                 id=call.id,
                 name=call.name,
@@ -465,4 +524,3 @@ def _clean_memory_value(value: str) -> str | None:
 
     cleaned = value.strip(" ：:，,。！!？?\t\n")
     return cleaned or None
-

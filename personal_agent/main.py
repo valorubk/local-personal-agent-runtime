@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
 try:
     # Typer 负责 CLI 参数解析；Rich 负责更舒服的终端显示。
@@ -21,6 +23,7 @@ from personal_agent.cli.errors import format_runtime_error
 from personal_agent.cli.input_editing import enable_terminal_input_editing
 from personal_agent.cli.prompt_input import create_prompt_reader
 from personal_agent.config import ConfigError, load_settings
+from personal_agent.debug_trace import DebugTraceRecorder, DebugTraceStore, NullDebugTraceRecorder
 from personal_agent.memory.store import MemoryStore
 from personal_agent.tools.file_tool import FileTool
 from personal_agent.tools.registry import ToolRegistry
@@ -43,7 +46,7 @@ else:
     app = None
 
 
-def _run(config: Optional[str] = None) -> None:
+def _run(config: Optional[str] = None, debug: bool = False) -> None:
     """启动真实交互式 CLI。
 
     这个函数是“组装层”：
@@ -79,6 +82,14 @@ def _run(config: Optional[str] = None) -> None:
         console.print(f"[yellow]Shell Tool 请求执行：[/yellow]{command}")
         return bool(Confirm.ask("是否允许执行该命令？", default=False))
 
+    def report_debug_error(message: str) -> None:
+        """展示调试持久化错误。
+
+        调试模式不输出调用链路本身；这里仅输出安全的中文错误提示。
+        """
+
+        console.print(f"[yellow]{message}[/yellow]")
+
     # MemoryStore 启动时会自动创建 SQLite 文件和表。
     memory = MemoryStore(settings.memory_db_path)
 
@@ -97,9 +108,18 @@ def _run(config: Optional[str] = None) -> None:
         memory=memory,
         tools=tools,
         enable_agents_update=True,
+        debug_recorder=(
+            DebugTraceRecorder(
+                session_id=str(uuid4()),
+                store=DebugTraceStore(Path.cwd()),
+                error_sink=report_debug_error,
+            )
+            if debug
+            else NullDebugTraceRecorder()
+        ),
     )
 
-    console.print(build_startup_banner())
+    console.print(build_startup_banner(debug=debug))
     read_user_input = create_prompt_reader()
     while True:
         # Prompt reader 会把 `> ` 作为不可编辑提示符传给输入库，
@@ -143,9 +163,14 @@ if typer is not None:
             "--config",
             "-c",
             help="本地配置文件路径。",
-        )
+        ),
+        debug: bool = typer.Option(
+            False,
+            "--debug",
+            help="开启调试模式，将调用链路写入本地 SQLite。",
+        ),
     ) -> None:
-        _run(config)
+        _run(config, debug=debug)
 
 
 def cli() -> None:

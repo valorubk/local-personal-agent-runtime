@@ -17,7 +17,7 @@ V1 的目标是先跑通一个类似 Claude Code 交互体验的本地个人助�
   - Profile Memory
   - Task History
   - Tool 调用摘要
-- SQLite 默认位置为 `.babyface/memory.sqlite3`，支持配置覆盖。
+- SQLite 默认位置为 `.babyface/memory/memory.sqlite3`，支持配置覆盖。
 - 支持通过分层 `AGENTS.md` 自定义 Babyface 的长期行为指令。
 - CLI 输出使用中文提示，最终回答支持流式展示路径。
 
@@ -54,7 +54,7 @@ export OPENAI_MODEL="your-model"
 可选配置：
 
 ```bash
-export BABYFACE_MEMORY_DB_PATH=".babyface/memory.sqlite3"
+export BABYFACE_MEMORY_DB_PATH=".babyface/memory/memory.sqlite3"
 export BABYFACE_SHELL_TIMEOUT_SECONDS="10"
 ```
 
@@ -64,17 +64,17 @@ export BABYFACE_SHELL_TIMEOUT_SECONDS="10"
 openai_api_key = "your-api-key"
 openai_base_url = "https://your-openai-compatible-endpoint/v1"
 openai_model = "your-model"
-memory_db_path = ".babyface/memory.sqlite3"
+memory_db_path = ".babyface/memory/memory.sqlite3"
 shell_timeout_seconds = 10
 ```
 
 日常命令行使用时，也可以把配置放在用户目录：
 
 ```text
-~/.babyface/config.toml
+~/.babyface/config/config.toml
 ```
 
-没有显式传入 `--config`、也没有设置 `BABYFACE_CONFIG_PATH` 时，Babyface 会先尝试读取当前目录的 `babyface.toml`，再尝试读取用户目录的 `~/.babyface/config.toml`。
+没有显式传入 `--config`、也没有设置 `BABYFACE_CONFIG_PATH` 时，Babyface 会先尝试读取当前目录的 `babyface.toml`，再尝试读取用户目录的 `~/.babyface/config/config.toml`。为了兼容旧版本，如果新路径不存在，也会回退读取 `~/.babyface/config.toml`。
 
 本地验证时也可以使用不会提交到 Git 的私密配置文件：
 
@@ -101,7 +101,7 @@ MODEL = "your-model"
 
 ## AGENTS.md
 
-`AGENTS.md` 用来写给 Agent 看的长期行为指令，例如交流风格、项目规则、工作偏好和未来多 Agent 的共享说明。它不承载 API key、模型、Memory 路径或 Shell timeout，这些运行配置仍放在环境变量、`babyface.toml` 或 `~/.babyface/config.toml` 中。
+`AGENTS.md` 用来写给 Agent 看的长期行为指令，例如交流风格、项目规则、工作偏好和未来多 Agent 的共享说明。它不承载 API key、模型、Memory 路径或 Shell timeout，这些运行配置仍放在环境变量、`babyface.toml` 或 `~/.babyface/config/config.toml` 中。
 
 Babyface 会按全局到局部的顺序读取存在的 `AGENTS.md`：
 
@@ -173,6 +173,28 @@ quit
 
 每轮回复会在 `Babyface:` 标签前后保留空行，让回复内容和下一轮输入提示保持间距。
 
+## 调试模式
+
+需要排查 Agent 内部调用链路时，可以使用：
+
+```bash
+babyface --debug
+```
+
+调试模式会把用户输入后、LLM 调用前后、Tool 调用前后、Skill 调用前后的链路记录写入本地 SQLite。调试记录默认保存在：
+
+```text
+.babyface/debug/debug_trace_YYYYMMDD
+```
+
+例如 2026 年 8 月 25 日的记录会写入：
+
+```text
+.babyface/debug/debug_trace_20260825
+```
+
+调试模式不会把调用链路记录打印到命令行；终端仍只展示正常的 Babyface 对话输出、Tool 状态和必要错误提示。调试记录可能包含用户输入、LLM 输入输出、Tool 结果和 Skill 上下文，请只在可信本地环境中开启，并按需要清理 `.babyface/debug/` 下的文件。
+
 ## Shell Tool 二次确认
 
 当 Agent 请求执行 shell 命令时，CLI 会先展示命令并询问是否允许执行。
@@ -190,7 +212,7 @@ quit
 默认数据库位置：
 
 ```text
-.babyface/memory.sqlite3
+.babyface/memory/memory.sqlite3
 ```
 
 Memory 分成两层：

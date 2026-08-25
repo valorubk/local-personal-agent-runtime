@@ -38,7 +38,7 @@ def load_settings(
 
     这个函数是配置层的唯一入口。它同时支持：
     1. 环境变量，例如 `OPENAI_API_KEY`
-    2. TOML 配置文件，例如 `babyface.local.toml` 或 `~/.babyface/config.toml`
+    2. TOML 配置文件，例如 `babyface.local.toml` 或 `~/.babyface/config/config.toml`
 
     参数里允许传入 `env`，主要是为了测试。测试时不应该真的修改系统环境变量，
     所以我们可以传一个普通 dict 进来模拟环境。
@@ -62,10 +62,10 @@ def load_settings(
     model = _get_value(source_env, config, "OPENAI_MODEL", "openai_model", "MODEL") or "gpt-4o-mini"
 
     # Memory 默认放在项目目录内，方便初版开发时观察 SQLite 文件。
-    # 后续如果要做成真正长期个人助手，可以改成用户目录，例如 `~/.babyface/`。
+    # 使用 `.babyface/memory/` 子目录，避免把运行文件全部堆在 `.babyface` 根目录。
     memory_path = (
         _get_value(source_env, config, "BABYFACE_MEMORY_DB_PATH", "memory_db_path")
-        or ".babyface/memory.sqlite3"
+        or ".babyface/memory/memory.sqlite3"
     )
 
     # Shell Tool 一定要有超时，避免 Agent 执行一个永不结束的命令导致 CLI 卡死。
@@ -109,7 +109,8 @@ def _load_config_file(
     # 1. CLI 通过 `--config` 传入的路径
     # 2. 环境变量 `BABYFACE_CONFIG_PATH`
     # 3. 当前目录下默认 `babyface.toml`
-    # 4. 用户目录下默认 `~/.babyface/config.toml`
+    # 4. 用户目录下默认 `~/.babyface/config/config.toml`
+    # 5. 旧版用户目录默认 `~/.babyface/config.toml`
     #
     # 第 4 条是为了让用户可以在任意目录直接运行 `babyface`，
     # 不必每次都带 `--config /path/to/config.toml`。
@@ -133,14 +134,17 @@ def _load_config_file(
 def _default_config_candidates(env: Mapping[str, str]) -> list[Path]:
     """返回没有显式指定配置文件时要尝试读取的默认路径。
 
-    `babyface.toml` 适合项目内开发；`~/.babyface/config.toml` 适合日常命令行使用。
+    `babyface.toml` 适合项目内开发；`~/.babyface/config/config.toml` 适合日常命令行使用。
     测试传入 `env={}` 时不会误读真实用户目录，避免本机私密配置影响单元测试。
     """
 
     candidates = [Path("babyface.toml")]
     home = env.get("HOME")
     if home:
-        candidates.append(Path(home) / ".babyface" / "config.toml")
+        babyface_dir = Path(home) / ".babyface"
+        candidates.append(babyface_dir / "config" / "config.toml")
+        # 兼容旧版默认位置，避免用户升级后因为配置文件没迁移而无法启动。
+        candidates.append(babyface_dir / "config.toml")
     return candidates
 
 

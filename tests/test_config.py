@@ -28,6 +28,13 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.memory_db_path, Path("/tmp/custom.sqlite3"))
         self.assertEqual(settings.shell_timeout_seconds, 7)
 
+    def test_default_memory_path_uses_memory_directory(self) -> None:
+        """防止默认 SQLite 文件继续堆在 `.babyface` 根目录。"""
+
+        settings = load_settings(env={"OPENAI_API_KEY": "test-key"})
+
+        self.assertEqual(settings.memory_db_path, Path(".babyface/memory/memory.sqlite3"))
+
     def test_project_config_file_is_read_when_env_is_absent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             config_path = Path(tmp) / "babyface.toml"
@@ -50,10 +57,10 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.memory_db_path, Path("data/memory.sqlite3"))
         self.assertEqual(settings.shell_timeout_seconds, 3)
 
-    def test_user_config_file_is_read_when_project_config_is_absent(self) -> None:
+    def test_user_config_file_is_read_from_config_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
-            config_path = home / ".babyface" / "config.toml"
+            config_path = home / ".babyface" / "config" / "config.toml"
             config_path.parent.mkdir(parents=True)
             config_path.write_text(
                 "\n".join(
@@ -69,6 +76,28 @@ class ConfigTests(unittest.TestCase):
 
         self.assertEqual(settings.openai_api_key, "home-key")
         self.assertEqual(settings.openai_model, "home-model")
+
+    def test_legacy_user_config_file_is_still_read_when_new_path_is_absent(self) -> None:
+        """防止升级后只存在旧 `~/.babyface/config.toml` 的用户无法启动。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            config_path = home / ".babyface" / "config.toml"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_text(
+                "\n".join(
+                    [
+                        'openai_api_key = "legacy-home-key"',
+                        'openai_model = "legacy-home-model"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            settings = load_settings(env={"HOME": str(home)})
+
+        self.assertEqual(settings.openai_api_key, "legacy-home-key")
+        self.assertEqual(settings.openai_model, "legacy-home-model")
 
     def test_config_file_accepts_uppercase_llm_aliases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

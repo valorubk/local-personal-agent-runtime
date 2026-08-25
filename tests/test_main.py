@@ -1,7 +1,12 @@
 import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 
 from typer.testing import CliRunner
 
+from personal_agent.agent.runtime import RuntimeResult
+from personal_agent.config import Settings
 from personal_agent.main import app
 
 
@@ -17,6 +22,53 @@ class MainCLITests(unittest.TestCase):
         self.assertIn("exit", result.stdout)
         self.assertIn("quit", result.stdout)
         self.assertIn("/exit", result.stdout)
+
+    def test_help_shows_debug_option(self) -> None:
+        """防止新增调试模式后，用户无法从 help 发现 `--debug` 参数。"""
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["--help"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("--debug", result.stdout)
+        self.assertIn("调试", result.stdout)
+
+    def test_debug_option_does_not_print_trace_fields_to_cli(self) -> None:
+        """防止调试模式把调用链路字段直接刷到命令行。"""
+
+        class FakeRuntime:
+            debug_recorder = None
+
+            def __init__(self, **kwargs):
+                FakeRuntime.debug_recorder = kwargs["debug_recorder"]
+
+            def run_turn(self, user_input):
+                return RuntimeResult(final_response=f"收到：{user_input}", stream=[f"收到：{user_input}"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings = Settings(
+                openai_api_key="test-key",
+                openai_base_url=None,
+                openai_model="test-model",
+                memory_db_path=root / "memory.sqlite3",
+                shell_timeout_seconds=3,
+            )
+            inputs = iter(["你好", "/exit"])
+            runner = CliRunner()
+            with (
+                patch("personal_agent.main.load_settings", return_value=settings),
+                patch("personal_agent.main.AgentRuntime", FakeRuntime),
+                patch("personal_agent.main.create_prompt_reader", return_value=lambda prompt: next(inputs)),
+            ):
+                result = runner.invoke(app, ["--debug"])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIsNotNone(FakeRuntime.debug_recorder)
+        self.assertNotIn("llm_before", result.stdout)
+        self.assertNotIn("tool_before", result.stdout)
+        self.assertNotIn("session_id=", result.stdout)
+        self.assertNotIn("trace_id=", result.stdout)
 
 
 if __name__ == "__main__":

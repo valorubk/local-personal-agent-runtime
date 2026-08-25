@@ -1,11 +1,15 @@
 import json
+import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
+from datetime import datetime
 from pathlib import Path
 
 from personal_agent.agent.llm import LLMResponse, ToolCall
 from personal_agent.agent.runtime import AgentRuntime
 from personal_agent.config import Settings
+from personal_agent.debug_trace import DebugTraceRecorder, DebugTraceStore
 from personal_agent.memory.store import MemoryStore
 from personal_agent.tools.base import ToolResult
 from personal_agent.tools.registry import ToolRegistry
@@ -137,6 +141,151 @@ class AgentRuntimeTests(unittest.TestCase):
             self.assertEqual(result.tool_results[0].name, "echo")
             self.assertTrue(result.tool_results[0].result.ok)
             self.assertIn("工具结果", str(llm.messages_seen[-1]))
+
+    def test_debug_trace_records_session_and_distinct_trace_ids_across_turns(self) -> None:
+        """防止调试链路无法按同一 Session 下的不同对话轮次回溯。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = MemoryStore(root / "memory.sqlite3")
+            llm = FakeLLMClient(
+                [
+                    LLMResponse(content="第一轮"),
+                    LLMResponse(content="第二轮"),
+                ]
+            )
+            runtime = AgentRuntime(
+                settings=self.make_settings(root / "memory.sqlite3"),
+                memory=store,
+                tools=ToolRegistry([]),
+                llm=llm,
+                debug_recorder=DebugTraceRecorder(
+                    session_id="session-fixed",
+                    store=DebugTraceStore(root),
+                    now=lambda: datetime(2026, 8, 25, 19, 6, 1),
+                ),
+            )
+
+            runtime.run_turn("你好")
+            runtime.run_turn("继续")
+
+            db_path = root / ".babyface" / "debug" / "debug_trace_20260825"
+            with closing(sqlite3.connect(db_path)) as conn:
+                rows = conn.execute(
+                    "SELECT session_id, trace_id FROM debug_trace_events ORDER BY id"
+                ).fetchall()
+
+        session_ids = {row[0] for row in rows}
+        trace_ids = {row[1] for row in rows}
+        self.assertEqual(session_ids, {"session-fixed"})
+        self.assertEqual(len(trace_ids), 2)
+
+    def test_debug_trace_records_llm_tool_and_skill_stages_to_sqlite(self) -> None:
+        """防止切面记录漏掉 LLM、Tool 或 Skill 的前后置阶段。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = MemoryStore(root / "memory.sqlite3")
+            llm = FakeLLMClient(
+                [
+                    LLMResponse(
+                        content="",
+                        tool_calls=[
+                            ToolCall(
+                                id="call-1",
+                                name="echo",
+                                arguments={"text": "工具结果"},
+                            )
+                        ],
+                    ),
+                    LLMResponse(content="最终：工具结果"),
+                ]
+            )
+            runtime_ref = {}
+            maintenance = RecordingAgentsMdMaintenance(store, lambda: runtime_ref["runtime"])
+            runtime = AgentRuntime(
+                settings=self.make_settings(root / "memory.sqlite3"),
+                memory=store,
+                tools=ToolRegistry([EchoTool()]),
+                llm=llm,
+                enable_agents_update=True,
+                agents_md_maintenance=maintenance,
+                debug_recorder=DebugTraceRecorder(
+                    session_id="session-fixed",
+                    store=DebugTraceStore(root),
+                    now=lambda: datetime(2026, 8, 25, 19, 6, 1),
+                ),
+            )
+            runtime_ref["runtime"] = runtime
+
+            runtime.run_turn("调用工具")
+
+            db_path = root / ".babyface" / "debug" / "debug_trace_20260825"
+            with closing(sqlite3.connect(db_path)) as conn:
+                stages = [
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT stage FROM debug_trace_events ORDER BY id"
+                    ).fetchall()
+                ]
+
+        for stage in [
+            "user_input_received",
+            "llm_before",
+            "llm_after",
+            "tool_before",
+            "tool_after",
+            "skill_before",
+            "skill_after",
+        ]:
+            self.assertIn(stage, stages)
+
+    def test_task_history_and_tool_calls_share_debug_trace_ids(self) -> None:
+        """防止 Memory 历史无法和 debug trace 按 session_id/trace_id 关联。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = MemoryStore(root / "memory.sqlite3")
+            llm = FakeLLMClient(
+                [
+                    LLMResponse(
+                        content="",
+                        tool_calls=[
+                            ToolCall(
+                                id="call-1",
+                                name="echo",
+                                arguments={"text": "工具结果"},
+                            )
+                        ],
+                    ),
+                    LLMResponse(content="最终：工具结果"),
+                ]
+            )
+            runtime = AgentRuntime(
+                settings=self.make_settings(root / "memory.sqlite3"),
+                memory=store,
+                tools=ToolRegistry([EchoTool()]),
+                llm=llm,
+                debug_recorder=DebugTraceRecorder(
+                    session_id="session-fixed",
+                    store=DebugTraceStore(root),
+                    now=lambda: datetime(2026, 8, 25, 19, 6, 1),
+                ),
+            )
+
+            runtime.run_turn("调用工具")
+
+            history = store.list_task_history()[0]
+            debug_db_path = root / ".babyface" / "debug" / "debug_trace_20260825"
+            with closing(sqlite3.connect(debug_db_path)) as conn:
+                debug_ids = conn.execute(
+                    "SELECT DISTINCT session_id, trace_id FROM debug_trace_events"
+                ).fetchall()
+
+        self.assertEqual(history.session_id, "session-fixed")
+        self.assertEqual(history.tool_calls[0]["session_id"], history.session_id)
+        self.assertEqual(history.tool_calls[0]["trace_id"], history.trace_id)
+        self.assertEqual(debug_ids, [(history.session_id, history.trace_id)])
 
     def test_runtime_includes_previous_turns_in_next_llm_call(self) -> None:
         """防止短期记忆断掉。
