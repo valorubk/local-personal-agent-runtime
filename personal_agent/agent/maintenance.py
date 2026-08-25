@@ -90,9 +90,10 @@ AgentsUpdateProposal = AgentsMdMaintenanceResult
 class AgentsMdMaintenanceService:
     """负责 post-turn `AGENTS.md` 自动维护的服务。
 
-    该服务位于主 Agent Loop 之外：它接收一轮任务上下文，调用 LLM 判断是否
-    产生长期偏好，读取单个目标 `AGENTS.md`，让 LLM 整理 managed section，
-    最后执行受控写入。Runtime 只负责编排调用，不直接理解这些维护细节。
+    该服务位于主 Agent Loop 之外：它接收一轮任务上下文，先用确定性规则确认
+    用户是否明示要求长期记住偏好；只有明示时才调用 LLM 判断候选规则，随后
+    读取单个目标 `AGENTS.md`，让 LLM 整理 managed section，最后执行受控写入。
+    Runtime 只负责编排调用，不直接理解这些维护细节。
     """
 
     def __init__(self, llm: LLMClient) -> None:
@@ -113,10 +114,11 @@ class AgentsMdMaintenanceService:
         可以获得确定的写入顺序和简单的 CLI 退出语义。
         """
 
+        if not _looks_like_explicit_agents_preference(context.user_input):
+            return None
+
         candidate = self._judge_agents_update_candidate(context)
         if candidate is None:
-            if not _looks_like_explicit_agents_preference(context.user_input):
-                return None
             candidate = self._judge_agents_update_candidate(context, force_explicit=True)
             if candidate is None:
                 return None

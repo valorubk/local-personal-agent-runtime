@@ -10,7 +10,8 @@
 
 - 让 `AgentRuntime` 只负责任务执行编排：清洗输入、显式 Memory 保存、运行 LangGraph、生成 stream、保存 Task History、更新短期历史、调用 post-turn maintenance。
 - 新增 `AgentsMdMaintenanceService`，集中管理 `AGENTS.md` 自动更新细节，并提供清晰的输入上下文和输出结果。
-- 保持现有自动写入行为：不新增用户确认；无候选规则时不写入；有候选规则时按目标层级写入 managed section。
+- 收紧自动写入入口：只有用户明示要求记住或长期采用某条偏好时，维护服务才进入 LLM 候选判断；没有明示时直接跳过，不调用维护 LLM，不写入文件。
+- 保持确认边界不变：不新增用户确认；有候选规则时按目标层级写入 managed section。
 - 当前版本保持同步 post-turn maintenance，避免引入后台队列、并发写入和 CLI 退出等待语义。
 - 保持现有安全边界：多层 `AGENTS.md` 拼接不做 LLM 合并；LLM 只整理单个目标文件的 managed section；写入函数只替换 managed section。
 - 让测试能清楚区分 Runtime 编排责任与 maintenance 服务责任。
@@ -47,14 +48,18 @@
 
 ### 3. 维护服务拥有 LLM prompt、JSON 解析和候选重试策略
 
-`AGENTS_UPDATE_JUDGE_PROMPT`、`AGENTS_UPDATE_FORCED_EXTRACTION_PROMPT`、`AGENTS_CONFLICT_RESOLUTION_PROMPT`、`_load_json_object()` 和 `_looks_like_explicit_agents_preference()` 从 Runtime 移入维护模块。服务负责：
+`AGENTS_UPDATE_JUDGE_PROMPT`、`AGENTS_CONFLICT_RESOLUTION_PROMPT`、`_load_json_object()` 和 `_looks_like_explicit_agents_preference()` 从 Runtime 移入维护模块。服务负责：
 
-1. 判断本轮是否产生长期候选规则。
-2. 对明确长期偏好表达进行保守兜底重试。
-3. 解析 LLM JSON，非 JSON 或空偏好时静默跳过。
-4. 读取单个目标 `AGENTS.md`。
-5. 让 LLM 生成整理后的 managed section 规则列表。
-6. 调用 `replace_managed_preferences()` 写入。
+1. 先用确定性启发式判断用户是否明示长期记忆或长期偏好意图。
+2. 未明示时直接返回，不调用维护 LLM，不写入 `AGENTS.md`。
+3. 已明示时调用 LLM 判断本轮是否产生长期候选规则。
+4. 如果首次判断过于保守且没有候选，允许使用更强的显式抽取 prompt 做一次兜底重试。
+5. 解析 LLM JSON，非 JSON 或空偏好时静默跳过。
+6. 读取单个目标 `AGENTS.md`。
+7. 让 LLM 生成整理后的 managed section 规则列表。
+8. 调用 `replace_managed_preferences()` 写入。
+
+新的入口是“显式意图先行”：没有显式意图时，LLM 没有机会自行推断并沉淀用户没有要求保存的内容；只有用户已经明示长期记忆意图时，服务才进入 LLM 判断和可选兜底重试。
 
 Runtime 只持有一个可选的 `agents_md_maintenance` 依赖和 `enable_agents_update` 开关，不再暴露 `_judge_agents_update_candidate()`、`_resolve_agents_update_conflicts()`、`_resolve_agents_update_path()` 这类维护细节方法。
 
@@ -89,6 +94,7 @@ V1 不把该结果展示给用户，也不要求用户确认。`AgentRuntime.run
 
 - Runtime 测试如果继续断言写入细节，会掩盖边界调整是否成功 → 拆分测试：Runtime 只验证 post-turn 调用时机和禁用开关；维护服务测试验证候选、冲突整理、目标解析和写入。
 - 服务抽离后依赖注入对象增多，初始化路径可能变复杂 → 默认构造 `AgentsMdMaintenanceService(llm=self.llm, ...)`，测试可显式注入 fake service。
+- 显式意图启发式过窄可能漏掉用户想保存的偏好 → 先偏保守，避免未授权写入长期 prompt；后续可以通过补充明确触发表达来扩展。
 - post-turn maintenance 失败可能影响用户主流程 → 保持现有容错原则：LLM 非 JSON 时跳过；如果写入路径或文件操作异常，本次任务主回答、Task History 和短期历史已经完成。实现阶段需要决定是否吞掉所有维护异常或仅保持现状；倾向于让维护流程自身尽量容错，不扩大主流程失败面。
 - 同步维护会让一轮 `run_turn()` 在主回答生成后多等待维护 LLM 调用 → 这是当前 V1 为换取确定写入顺序、简单测试和清晰退出语义接受的成本；后续如体验上明显变慢，再通过同一 service 接口演进为串行异步队列。
 - 未来升级为独立 Steward Agent 时，当前同步接口可能需要演进 → 先用清晰 context/result 边界隔离 Runtime，后续可把 service 内部实现替换为 Agent，而不改变 Runtime 调用位置。
@@ -98,7 +104,8 @@ V1 不把该结果展示给用户，也不要求用户确认。`AgentRuntime.run
 1. 新增维护模块和数据结构，把 Runtime 中 `AGENTS.md` 自动更新相关 prompt、数据类、解析函数和流程方法迁移进去。
 2. 修改 `AgentRuntime.__init__()`，支持注入维护服务；未注入且启用自动更新时创建默认服务。
 3. 修改 `run_turn()`，在 Task History 保存和短期历史更新后调用维护服务，并保持返回值不变。
-4. 调整测试：新增维护服务单元测试覆盖原有自动写入场景；Runtime 测试改为验证调用边界。
-5. 运行相关单元测试，确认 `AGENTS.md` 加载、自动更新和 Runtime 主循环行为保持兼容。
+4. 在维护服务入口增加显式长期偏好门禁，未明示时跳过 LLM 判断和文件写入。
+5. 调整测试：新增维护服务单元测试覆盖原有自动写入场景和未明示不写入场景；Runtime 测试改为验证调用边界。
+6. 运行相关单元测试，确认 `AGENTS.md` 加载、显式写入门禁和 Runtime 主循环行为保持兼容。
 
 回滚策略：如果抽离后出现问题，可以把 `AgentRuntime` 的维护服务依赖临时关闭，主 Agent Loop、Task History 和短期记忆仍能保持可用。

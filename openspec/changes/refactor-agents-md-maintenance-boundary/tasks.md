@@ -6,6 +6,7 @@
 - [x] 1.4 新增维护服务单元测试，覆盖明确长期偏好表达触发兜底重试
 - [x] 1.5 调整 Runtime 测试，验证 `enable_agents_update=False` 时不调用 maintenance 服务
 - [x] 1.6 调整 Runtime 测试，验证 `enable_agents_update=True` 时在 Task History 保存和短期历史更新后调用 maintenance 服务
+- [x] 1.7 新增维护服务单元测试，覆盖用户未明示长期记忆意图时不调用 `AGENTS.md` 更新判断 LLM
 
 ## 2. 维护服务抽离
 
@@ -16,6 +17,7 @@
 - [x] 2.5 将 JSON 解析、明确偏好启发式判断、目标路径解析迁移到维护模块
 - [x] 2.6 在维护服务中复用 `build_agents_prompt()` 和 `replace_managed_preferences()`，避免复制确定性文件处理逻辑
 - [x] 2.7 保持维护服务当前为同步 `run(context)` 接口，不引入异步 worker，同时避免 Runtime 依赖服务内部实现细节
+- [x] 2.8 在维护服务入口增加确定性显式记忆门禁，未明示时直接跳过 LLM 判断和文件写入
 
 ## 3. Runtime 编排改造
 
@@ -33,3 +35,5 @@
 - [x] 4.3 运行 `AGENTS.md` prompt profile 相关测试，确认分层拼接和 managed section 写入安全边界未变化
 - [x] 4.4 检查代码中不再从 Runtime 直接暴露维护细节，确保职责边界符合 design
 - [x] 4.5 按项目规范提交本次实现相关改动
+- [x] 4.6 运行更新后的维护服务和完整测试套件，确认未明示输入不会污染 `AGENTS.md`
+- [x] 4.7 提交显式记忆门禁相关规格、实现和测试改动

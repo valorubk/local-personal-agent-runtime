@@ -22,6 +22,16 @@ class FakeLLMClient:
         yield from text
 
 
+class FailingLLMClient:
+    """如果维护服务错误调用 LLM，测试应立即失败。"""
+
+    def complete(self, messages, tools):
+        raise AssertionError("未明示长期记忆意图时不应调用 AGENTS.md 更新判断 LLM")
+
+    def stream_text(self, text):
+        yield from text
+
+
 class AgentsMdMaintenanceServiceTests(unittest.TestCase):
     """验证 `AGENTS.md` 维护服务独立承担 post-turn prompt 维护职责。"""
 
@@ -48,6 +58,18 @@ class AgentsMdMaintenanceServiceTests(unittest.TestCase):
             service = AgentsMdMaintenanceService(llm=llm)
 
             result = service.run(self.make_context(root, "帮我计算 1+1", "2"))
+
+        self.assertIsNone(result)
+        self.assertFalse((root / "home" / ".babyface" / "AGENTS.md").exists())
+
+    def test_skips_llm_judgement_when_user_does_not_explicitly_ask_to_remember(self) -> None:
+        """防止普通情绪或一次性请求被 LLM 自主沉淀到 `AGENTS.md`。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            service = AgentsMdMaintenanceService(llm=FailingLLMClient())
+
+            result = service.run(self.make_context(root, "天在下雨，我好怕怕", "别怕，下雨天也可以很安心。"))
 
         self.assertIsNone(result)
         self.assertFalse((root / "home" / ".babyface" / "AGENTS.md").exists())
