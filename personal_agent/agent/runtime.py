@@ -472,6 +472,9 @@ class AgentRuntime:
         app_open_response = self._successful_app_open_response(state)
         if app_open_response:
             content = app_open_response
+        http_title_response = self._http_title_response(state)
+        if http_title_response:
+            content = http_title_response
         return {**state, "final_response": content}
 
     def _successful_app_open_response(self, state: RuntimeState) -> str | None:
@@ -495,6 +498,29 @@ class AgentRuntime:
         if not matched_app:
             return "已成功打开 App。"
         return f"已成功打开{matched_app}。"
+
+    def _http_title_response(self, state: RuntimeState) -> str | None:
+        """当用户明确询问网页标题时，优先使用 HTTP Tool 的标题字段。
+
+        HTML 页面里 `<title>` 或 `og:title` 是比模型自由生成更可信的来源。
+        如果工具已经把标题解析进 metadata，Runtime 直接返回该字段，避免
+        LLM 根据页面片段、推荐内容或自身知识编造标题。
+        """
+
+        user_input = state.get("user_input", "")
+        if "标题" not in user_input:
+            return None
+        tool_results = list(state.get("tool_results", []))
+        successful_http_calls = [
+            executed
+            for executed in tool_results
+            if executed.name == "http_request" and executed.result.ok
+        ]
+        for executed in reversed(successful_http_calls):
+            title = str(executed.result.metadata.get("title") or "").strip()
+            if title:
+                return f"网页标题：{title}"
+        return None
 
     def _save_explicit_profile_memory(self, user_input: str) -> None:
         """保存用户明确要求记住的长期信息。

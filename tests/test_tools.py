@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import gzip
 from pathlib import Path
 
 from personal_agent.tools.app_tool import AppOpenTool
@@ -169,7 +170,7 @@ class ToolTests(unittest.TestCase):
         self.assertIn("缺少 App 名称", result.error or "")
 
     def test_http_request_tool_parses_json_response(self) -> None:
-        tool = HttpRequestTool(opener=lambda request, timeout: FakeHttpResponse(
+        tool = HttpRequestTool(opener=lambda request, *, timeout: FakeHttpResponse(
             body=b'{"message":"hello"}',
             headers={"Content-Type": "application/json"},
             status=201,
@@ -182,8 +183,22 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(result.metadata["status_code"], 201)
         self.assertEqual(result.metadata["response_type"], "json")
 
+    def test_http_request_tool_passes_timeout_as_keyword_argument(self) -> None:
+        """防止真实 `urlopen` 把 timeout 误当成 request body 参数。"""
+
+        calls: list[float] = []
+
+        def opener(request, *, timeout):
+            calls.append(timeout)
+            return FakeHttpResponse(body=b"ok", headers={"Content-Type": "text/plain"})
+
+        result = HttpRequestTool(opener=opener).run({"url": "https://example.test", "timeout_seconds": 2})
+
+        self.assertTrue(result.ok)
+        self.assertEqual(calls, [2.0])
+
     def test_http_request_tool_returns_text_response(self) -> None:
-        tool = HttpRequestTool(max_body_chars=5, opener=lambda request, timeout: FakeHttpResponse(
+        tool = HttpRequestTool(max_body_chars=5, opener=lambda request, *, timeout: FakeHttpResponse(
             body=b"hello world",
             headers={"Content-Type": "text/plain"},
         ))
@@ -195,6 +210,24 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(result.metadata["response_type"], "text")
         self.assertTrue(result.metadata["truncated"])
 
+    def test_http_request_tool_decompresses_gzip_html_and_extracts_title(self) -> None:
+        """防止 gzip 页面被当成乱码，导致模型根据空信息编造网页标题。"""
+
+        html = "<html><head><title>真实视频标题</title></head><body>正文</body></html>"
+        tool = HttpRequestTool(opener=lambda request, *, timeout: FakeHttpResponse(
+            body=gzip.compress(html.encode("utf-8")),
+            headers={"Content-Type": "text/html; charset=utf-8", "Content-Encoding": "gzip"},
+        ))
+
+        result = tool.run({"url": "https://example.test/video"})
+
+        self.assertTrue(result.ok)
+        self.assertIn("网页标题: 真实视频标题", result.content)
+        self.assertIn("正文", result.content)
+        self.assertEqual(result.metadata["response_type"], "html")
+        self.assertEqual(result.metadata["title"], "真实视频标题")
+        self.assertFalse(result.metadata["compressed"])
+
     def test_http_request_tool_rejects_unsupported_protocol(self) -> None:
         result = HttpRequestTool().run({"url": "file:///tmp/a.txt"})
 
@@ -202,7 +235,7 @@ class ToolTests(unittest.TestCase):
         self.assertIn("仅支持 HTTP 和 HTTPS", result.error or "")
 
     def test_http_request_tool_reports_network_error(self) -> None:
-        def fail(_request, _timeout):
+        def fail(_request, *, timeout):
             raise OSError("network down")
 
         result = HttpRequestTool(opener=fail).run({"url": "https://example.test"})
@@ -211,7 +244,7 @@ class ToolTests(unittest.TestCase):
         self.assertIn("HTTP 请求失败", result.error or "")
 
     def test_http_request_tool_parses_sse_events(self) -> None:
-        tool = HttpRequestTool(opener=lambda request, timeout: FakeHttpResponse(
+        tool = HttpRequestTool(opener=lambda request, *, timeout: FakeHttpResponse(
             body=b"id: 1\nevent: message\ndata: hello\n\ndata: world\n\n",
             headers={"Content-Type": "text/event-stream"},
         ))
@@ -226,7 +259,7 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(result.metadata["stop_reason"], "event_limit")
 
     def test_http_request_tool_returns_partial_sse_events_on_connection_end(self) -> None:
-        tool = HttpRequestTool(opener=lambda request, timeout: FakeHttpResponse(
+        tool = HttpRequestTool(opener=lambda request, *, timeout: FakeHttpResponse(
             body=b"data: only-one\n\n",
             headers={"Content-Type": "text/event-stream"},
         ))

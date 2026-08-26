@@ -87,6 +87,23 @@ class SuccessfulAppTool:
         )
 
 
+class SuccessfulHttpTitleTool:
+    """模拟 HTTP Tool 从 HTML 中解析出网页标题。"""
+
+    name = "http_request"
+    description = "发送 HTTP 请求"
+
+    def to_openai_tool(self):
+        return {"type": "function", "function": {"name": self.name}}
+
+    def run(self, arguments):
+        return ToolResult(
+            ok=True,
+            content="网页标题: 真实网页标题",
+            metadata={"response_type": "html", "title": "真实网页标题"},
+        )
+
+
 class RecordingAgentsMdMaintenance:
     """记录 Runtime 是否在一轮结束后调用维护服务。"""
 
@@ -193,6 +210,37 @@ class AgentRuntimeTests(unittest.TestCase):
             result = runtime.run_turn("打开网易云音乐")
 
         self.assertEqual(result.final_response, "已成功打开网易云音乐。")
+
+    def test_runtime_uses_http_title_metadata_when_user_asks_for_page_title(self) -> None:
+        """防止 HTTP Tool 已解析标题后，最终回答仍被 LLM 编造成其他标题。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MemoryStore(Path(tmp) / "memory.sqlite3")
+            llm = FakeLLMClient(
+                [
+                    LLMResponse(
+                        content="",
+                        tool_calls=[
+                            ToolCall(
+                                id="call-http",
+                                name="http_request",
+                                arguments={"url": "https://example.test/video"},
+                            )
+                        ],
+                    ),
+                    LLMResponse(content="这个网页标题是：虚假的网页标题"),
+                ]
+            )
+            runtime = AgentRuntime(
+                settings=self.make_settings(Path(tmp) / "memory.sqlite3"),
+                memory=store,
+                tools=ToolRegistry([SuccessfulHttpTitleTool()]),
+                llm=llm,
+            )
+
+            result = runtime.run_turn("告诉我这个网页下的视频的标题是什么 https://example.test/video")
+
+        self.assertEqual(result.final_response, "网页标题：真实网页标题")
 
     def test_system_prompt_tells_model_to_use_tools_or_ask_for_missing_arguments(self) -> None:
         """防止模型在天气等实时信息场景中不调用工具也不追问必要参数。"""

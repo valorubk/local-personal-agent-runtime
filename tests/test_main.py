@@ -187,6 +187,7 @@ class MainCLITests(unittest.TestCase):
         self.assertIn("os_config_read", FakeRuntime.tool_names)
         self.assertIn("app_open", FakeRuntime.tool_names)
         self.assertIn("http_request", FakeRuntime.tool_names)
+        self.assertNotIn("web_search", FakeRuntime.tool_names)
 
 
 if __name__ == "__main__":

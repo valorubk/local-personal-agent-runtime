@@ -30,3 +30,12 @@
 - [x] 5.3 调整 App Open Tool，优先扫描 macOS 应用目录并读取本地化显示名后再执行打开。
 - [x] 5.4 调整 Runtime，让成功的 `app_open` 结果不再触发多余排查建议。
 - [x] 5.5 调整 App Open Tool，使无法解码的 `InfoPlist.strings` 不会中断应用目录扫描。
+
+## 6. HTTP 内容可信度缺陷修复
+
+- [x] 6.1 为 HTTP Request Tool 增加回归测试，覆盖 `urlopen` 的 timeout 必须作为关键字参数传入。
+- [x] 6.2 为 HTTP Request Tool 增加回归测试，覆盖 gzip HTML 解压和网页标题提取。
+- [x] 6.3 为 Runtime 增加回归测试，覆盖用户询问网页标题时必须使用 HTTP Tool 的标题 metadata。
+- [x] 6.4 修复 HTTP Request Tool 的真实 `urlopen` 调用参数、gzip 解压、charset 解码和 HTML 标题解析。
+- [x] 6.5 调整 Runtime，让标题类问题优先返回 HTTP Tool 解析出的可信标题。
+- [x] 6.6 替换默认 `web_search` 占位工具，CLI 内置工具列表只暴露真实可用的 `http_request` 网页请求能力。

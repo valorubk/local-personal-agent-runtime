@@ -1,12 +1,13 @@
 ## Context
 
-当前内置 Tool 通过 `ToolRegistry` 注入 `AgentRuntime`，CLI 在启动时注册 `FileTool`、`ShellTool` 和 `WebTool`。Tool 返回统一的 `ToolResult`，Runtime 只负责把 Tool schema 交给 LLM、执行工具并将结果回传给 LLM；因此本次迭代应继续保持“工具内部处理参数校验与错误隔离，Runtime 不关心具体工具”的边界。
+当前内置 Tool 通过 `ToolRegistry` 注入 `AgentRuntime`，CLI 在启动时注册内置工具。历史上的 `WebTool` 只是未实现占位，容易让模型误选一个不能提供真实网页内容的工具；本次迭代用 `http_request` 替代该占位能力。Tool 返回统一的 `ToolResult`，Runtime 只负责把 Tool schema 交给 LLM、执行工具并将结果回传给 LLM；因此本次迭代应继续保持“工具内部处理参数校验与错误隔离，Runtime 不关心具体工具”的边界。
 
 ## Goals / Non-Goals
 
 **Goals:**
 
 - 新增三个内置本地 Tool，并在 CLI 启动时默认注册。
+- 默认工具列表不再暴露未实现的 `web_search` 占位工具。
 - 让每个 Tool 都能被单元测试独立覆盖，不依赖真实 LLM。
 - Shell Tool 增加安全只读命令自动放行逻辑，同时保留风险命令确认。
 - HTTP Request Tool 优先使用 Python 标准库完成普通响应和 SSE 响应解析，减少依赖面。
@@ -42,7 +43,9 @@ App Open Tool 在 macOS 上优先扫描 `/Applications`、`/System/Applications`
 
 ### 4. HTTP Request Tool 使用标准库并区分普通响应与 SSE 响应
 
-HTTP Request Tool 使用 `urllib.request` 发送请求，只允许 `http` 和 `https`。请求参数支持 method、url、headers、body、timeout_seconds。普通响应按字节读取后尝试 UTF-8 解码和 JSON 解析；JSON 成功时返回格式化 JSON，失败时返回文本摘要。响应内容需要设置最大字符数，避免把超大响应塞进 LLM 上下文。
+HTTP Request Tool 使用 `urllib.request` 发送请求，只允许 `http` 和 `https`。请求参数支持 method、url、headers、body、timeout_seconds。调用 `urlopen` 时必须使用 `timeout=` 关键字参数，避免真实标准库把 timeout 误当成 request body。普通响应按字节读取后先根据 `Content-Encoding` 解压 gzip，再按 `Content-Type` 中的 charset 解码，并尝试 JSON 解析；JSON 成功时返回格式化 JSON，失败时返回文本摘要。响应内容需要设置最大字符数，避免把超大响应塞进 LLM 上下文。
+
+当普通响应是 HTML 时，工具从 `<title>` 或 `og:title` 中提取网页标题，写入 metadata 并在 content 开头明确展示。用户询问网页标题时，Runtime 优先使用 HTTP Tool 的 `metadata.title` 生成确定性回答，避免 LLM 根据页面片段、推荐内容或空信息编造标题。
 
 当响应 `Content-Type` 是 `text/event-stream` 时，工具进入 SSE 解析模式：按行读取 `event:`、`data:`、`id:`、`retry:` 字段，用空行作为一个事件的结束，收集有限数量事件后返回摘要。SSE 读取必须有最大事件数和超时边界；达到事件上限、超时或连接中断时，返回已收集事件，并在 metadata 中记录停止原因。V1 不把 SSE 实时流式转发给用户，只提供有限采样后的结构化结果。
 
@@ -67,6 +70,7 @@ LangGraph Agent Loop 不需要新增节点；工具 schema 会随 `ToolRegistry.
 - [Risk] Shell 安全分类过宽会带来误操作风险。→ Mitigation：使用 allowlist 优先，未知命令默认走确认；测试覆盖典型安全和风险命令。
 - [Risk] Shell 安全分类过窄会让部分只读命令仍需确认。→ Mitigation：先覆盖项目开发常用只读命令，后续按实际使用逐步扩展 allowlist。
 - [Risk] HTTP Tool 可能读取到过大的响应。→ Mitigation：限制返回内容长度，并在 metadata 中记录是否截断。
+- [Risk] 压缩页面未解压会把乱码交给 LLM，诱发虚假总结。→ Mitigation：根据 `Content-Encoding` 解压 gzip 后再解析，并为 HTML 标题提供结构化 metadata。
 - [Risk] SSE 长连接可能让工具长时间挂起。→ Mitigation：设置最大事件数、最大读取时长和 timeout，返回有限事件摘要而不是无限监听。
 - [Risk] HTTP Tool 访问内网或本机地址可能产生安全争议。→ Mitigation：本次保持为用户本机主动请求能力，不持久化凭证；未来如需要可增加 host denylist 或确认策略。
 - [Risk] App 模糊匹配可能选错应用。→ Mitigation：设置匹配阈值，优先读取本地化显示名提高匹配质量；低于阈值时不打开任何 App，并在 metadata 中记录候选和分数。

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import gzip
+import html
+import re
 import time
 import urllib.error
 import urllib.request
@@ -82,7 +85,7 @@ class HttpRequestTool:
         request = urllib.request.Request(url=url, data=body, headers=headers, method=method)
 
         try:
-            with self.opener(request, timeout_seconds) as response:
+            with self.opener(request, timeout=timeout_seconds) as response:
                 content_type = self._header_value(response, "Content-Type")
                 if "text/event-stream" in content_type.casefold():
                     return self._read_sse_response(response, arguments)
@@ -99,13 +102,15 @@ class HttpRequestTool:
     def _read_normal_response(self, response: Any, content_type: str) -> ToolResult:
         """读取普通 HTTP 响应，并按 JSON 或文本返回。"""
 
-        raw_body = response.read()
-        text = self._decode_body(raw_body)
+        raw_body = self._decode_response_body(response)
+        text = self._decode_body(raw_body, content_type)
         status_code = int(getattr(response, "status", 200))
         headers = self._headers_summary(response)
         try:
             parsed_json = json.loads(text)
         except json.JSONDecodeError:
+            if "text/html" in content_type.casefold():
+                return self._read_html_response(text, response, content_type)
             truncated_text, truncated = self._truncate(text)
             return ToolResult(
                 ok=True,
@@ -130,6 +135,36 @@ class HttpRequestTool:
                 "content_type": content_type,
                 "response_type": "json",
                 "truncated": truncated,
+            },
+        )
+
+    def _read_html_response(self, text: str, response: Any, content_type: str) -> ToolResult:
+        """解析 HTML 响应，优先提取网页标题。
+
+        对网页类请求，用户经常询问“标题是什么”。如果只把整段 HTML
+        塞给 LLM，模型可能从脚本、推荐内容或空信息里误猜。这里把
+        `<title>` 或 OpenGraph 标题提成明确字段，降低误读概率。
+        """
+
+        title = self._extract_html_title(text)
+        truncated_text, truncated = self._truncate(text)
+        title_line = f"网页标题: {title}\n\n" if title else "网页标题: 未在 HTML 中解析到标题\n\n"
+        return ToolResult(
+            ok=True,
+            content=(
+                f"{title_line}"
+                "以下是 HTTP Tool 从响应体解码得到的 HTML 文本片段；"
+                "回答时只能依据这里实际出现的内容，不得补全未出现的信息。\n"
+                f"{truncated_text}"
+            ),
+            metadata={
+                "status_code": int(getattr(response, "status", 200)),
+                "headers": self._headers_summary(response),
+                "content_type": content_type,
+                "response_type": "html",
+                "title": title,
+                "truncated": truncated,
+                "compressed": False,
             },
         )
 
@@ -246,10 +281,45 @@ class HttpRequestTool:
             return default
         return number if number > 0 else default
 
-    def _decode_body(self, body: bytes) -> str:
+    def _decode_response_body(self, response: Any) -> bytes:
+        """读取并按响应头解压响应体。"""
+
+        body = response.read()
+        encoding = self._header_value(response, "Content-Encoding").casefold()
+        if encoding == "gzip":
+            try:
+                return gzip.decompress(body)
+            except OSError:
+                return body
+        return body
+
+    def _decode_body(self, body: bytes, content_type: str = "") -> str:
         """把响应 bytes 解码成文本，遇到坏字符时保留可读内容。"""
 
-        return body.decode("utf-8", errors="replace")
+        charset = self._extract_charset(content_type) or "utf-8"
+        return body.decode(charset, errors="replace")
+
+    def _extract_charset(self, content_type: str) -> str | None:
+        """从 Content-Type 中提取 charset。"""
+
+        match = re.search(r"charset=([^;\s]+)", content_type, flags=re.IGNORECASE)
+        return match.group(1).strip('"') if match else None
+
+    def _extract_html_title(self, text: str) -> str | None:
+        """从 HTML 中提取可信标题字段。"""
+
+        patterns = [
+            r"<meta[^>]+property=[\"']og:title[\"'][^>]+content=[\"'](?P<title>[^\"']+)[\"'][^>]*>",
+            r"<meta[^>]+content=[\"'](?P<title>[^\"']+)[\"'][^>]+property=[\"']og:title[\"'][^>]*>",
+            r"<title[^>]*>(?P<title>.*?)</title>",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+            if match:
+                title = re.sub(r"\s+", " ", html.unescape(match.group("title"))).strip()
+                if title:
+                    return title
+        return None
 
     def _header_value(self, response: Any, name: str) -> str:
         """按大小写不敏感方式读取响应头。"""

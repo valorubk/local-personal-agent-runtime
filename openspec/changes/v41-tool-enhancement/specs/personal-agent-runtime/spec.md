@@ -61,6 +61,18 @@
 - **WHEN** HTTP 响应体不是合法 JSON 但可作为文本读取
 - **THEN** Tool 返回文本内容摘要，并在 metadata 中标明响应类型为文本
 
+#### Scenario: 解压压缩响应
+- **WHEN** HTTP 响应头声明响应体使用 gzip 压缩
+- **THEN** Tool 解压响应体后再解析内容，不得把压缩字节当作普通文本返回给 Agent
+
+#### Scenario: 解析 HTML 网页标题
+- **WHEN** HTTP 响应是 HTML 且页面中包含标题字段
+- **THEN** Tool 提取可信网页标题并写入 metadata，供 Agent 回答标题类问题
+
+#### Scenario: 使用 HTTP 标题 metadata 回答标题问题
+- **WHEN** 用户询问网页标题且 HTTP Request Tool 已解析出标题 metadata
+- **THEN** Agent 最终回复必须使用该标题 metadata，不得编造或替换成工具结果中不存在的标题
+
 #### Scenario: 解析 SSE 响应
 - **WHEN** HTTP 响应 Content-Type 是 `text/event-stream`
 - **THEN** Tool 按 SSE 格式读取有限数量的事件，返回事件摘要，并在 metadata 中标明响应类型为 SSE
@@ -76,6 +88,10 @@
 #### Scenario: HTTP 请求超时或网络失败
 - **WHEN** HTTP 请求超时或发生网络错误
 - **THEN** Tool 返回结构化错误，且 Session 不崩溃
+
+#### Scenario: HTTP Tool 替代 Web Search 占位
+- **WHEN** CLI 启动并注册默认内置 Tool
+- **THEN** 系统 SHALL 暴露 `http_request` 作为网页请求工具，不应再暴露未实现的 `web_search` 占位工具
 
 ## MODIFIED Requirements
 

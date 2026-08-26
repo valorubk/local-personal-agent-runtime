@@ -33,7 +33,6 @@ from personal_agent.tools.http_tool import HttpRequestTool
 from personal_agent.tools.os_config_tool import OSConfigTool
 from personal_agent.tools.registry import ToolRegistry
 from personal_agent.tools.shell_tool import ShellTool
-from personal_agent.tools.web_tool import WebTool
 
 
 if typer is not None:
@@ -105,7 +104,6 @@ def _run(config: Optional[str] = None, debug: bool = False) -> None:
         AppOpenTool(),
         HttpRequestTool(),
         ShellTool(timeout_seconds=settings.shell_timeout_seconds, confirm=confirm_shell),
-        WebTool(),
     ]
 
     mcp_manager: McpServerManager | None = None
