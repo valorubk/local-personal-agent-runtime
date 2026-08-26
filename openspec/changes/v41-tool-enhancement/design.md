@@ -43,7 +43,7 @@ App Open Tool 在 macOS 上优先扫描 `/Applications`、`/System/Applications`
 
 ### 4. HTTP Request Tool 使用标准库并区分普通响应与 SSE 响应
 
-HTTP Request Tool 使用 `urllib.request` 发送请求，只允许 `http` 和 `https`。请求参数支持 method、url、headers、body、timeout_seconds。调用 `urlopen` 时必须使用 `timeout=` 关键字参数，避免真实标准库把 timeout 误当成 request body。普通响应按字节读取后先根据 `Content-Encoding` 解压 gzip，再按 `Content-Type` 中的 charset 解码，并尝试 JSON 解析；JSON 成功时返回格式化 JSON，失败时返回文本摘要。响应内容需要设置最大字符数，避免把超大响应塞进 LLM 上下文。
+HTTP Request Tool 使用 `urllib.request` 发送请求，只允许 `http` 和 `https`。请求参数支持 method、url、headers、body、timeout_seconds。工具默认附加基础浏览器风格请求头，包括 User-Agent、Accept、Accept-Language 和 Accept-Encoding，降低真实网页因标准库裸请求画像返回 412 等拒绝状态的概率；用户传入同名 headers 时按大小写不敏感方式覆盖默认值。调用 `urlopen` 时必须使用 `timeout=` 关键字参数，避免真实标准库把 timeout 误当成 request body。普通响应按字节读取后先根据 `Content-Encoding` 解压 gzip，再按 `Content-Type` 中的 charset 解码，并尝试 JSON 解析；JSON 成功时返回格式化 JSON，失败时返回文本摘要。响应内容需要设置最大字符数，避免把超大响应塞进 LLM 上下文。
 
 当普通响应是 HTML 时，工具从 `<title>` 或 `og:title` 中提取网页标题，写入 metadata 并在 content 开头明确展示。用户询问网页标题时，Runtime 优先使用 HTTP Tool 的 `metadata.title` 生成确定性回答，避免 LLM 根据页面片段、推荐内容或空信息编造标题。
 

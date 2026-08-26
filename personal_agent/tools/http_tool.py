@@ -24,6 +24,16 @@ class HttpRequestTool:
 
     name = "http_request"
     description = "发送 HTTP/HTTPS 请求，解析 JSON、文本或有限 SSE 响应。"
+    DEFAULT_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip",
+    }
 
     def __init__(
         self,
@@ -76,7 +86,7 @@ class HttpRequestTool:
             return ToolResult(ok=False, error="仅支持 HTTP 和 HTTPS URL。", metadata={"url": url})
 
         method = str(arguments.get("method") or "GET").strip().upper()
-        headers = self._coerce_headers(arguments.get("headers"))
+        headers = self._build_request_headers(arguments.get("headers"))
         body = self._coerce_body(arguments.get("body"))
         timeout_seconds = self._coerce_positive_float(
             arguments.get("timeout_seconds"),
@@ -253,6 +263,23 @@ class HttpRequestTool:
         if not isinstance(raw_headers, dict):
             return {}
         return {str(key): str(value) for key, value in raw_headers.items()}
+
+    def _build_request_headers(self, raw_headers: object) -> dict[str, str]:
+        """合成最终请求头。
+
+        许多真实网页会拒绝没有浏览器请求画像的标准库裸请求。这里先提供一组
+        温和的浏览器默认头，再用用户显式传入的 headers 做大小写不敏感覆盖。
+        """
+
+        headers = dict(self.DEFAULT_HEADERS)
+        user_headers = self._coerce_headers(raw_headers)
+        for key, value in user_headers.items():
+            matched_default_key = next(
+                (default_key for default_key in headers if default_key.casefold() == key.casefold()),
+                key,
+            )
+            headers[matched_default_key] = value
+        return headers
 
     def _coerce_body(self, raw_body: object) -> bytes | None:
         """把请求体转换为 bytes；缺省时表示没有请求体。"""

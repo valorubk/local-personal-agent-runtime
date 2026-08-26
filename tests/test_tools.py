@@ -197,6 +197,45 @@ class ToolTests(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(calls, [2.0])
 
+    def test_http_request_tool_uses_browser_headers_by_default(self) -> None:
+        """防止网页站点因为 `urllib` 裸请求画像而返回 412 等反爬状态。"""
+
+        captured_headers: list[dict[str, str]] = []
+
+        def opener(request, *, timeout):
+            captured_headers.append(dict(request.header_items()))
+            return FakeHttpResponse(body=b"ok", headers={"Content-Type": "text/plain"})
+
+        result = HttpRequestTool(opener=opener).run({"url": "https://example.test/video"})
+
+        self.assertTrue(result.ok)
+        self.assertIn("Mozilla/5.0", captured_headers[0]["User-agent"])
+        self.assertIn("text/html", captured_headers[0]["Accept"])
+        self.assertIn("zh-CN", captured_headers[0]["Accept-language"])
+        self.assertEqual(captured_headers[0]["Accept-encoding"], "gzip")
+
+    def test_http_request_tool_allows_user_headers_to_override_defaults(self) -> None:
+        """用户显式传入 headers 时应覆盖默认请求头，方便访问特殊 API。"""
+
+        captured_headers: list[dict[str, str]] = []
+
+        def opener(request, *, timeout):
+            captured_headers.append(dict(request.header_items()))
+            return FakeHttpResponse(body=b"ok", headers={"Content-Type": "text/plain"})
+
+        result = HttpRequestTool(opener=opener).run({
+            "url": "https://example.test/api",
+            "headers": {
+                "User-Agent": "CustomClient/1.0",
+                "Accept": "application/json",
+            },
+        })
+
+        self.assertTrue(result.ok)
+        self.assertEqual(captured_headers[0]["User-agent"], "CustomClient/1.0")
+        self.assertEqual(captured_headers[0]["Accept"], "application/json")
+        self.assertIn("Accept-language", captured_headers[0])
+
     def test_http_request_tool_returns_text_response(self) -> None:
         tool = HttpRequestTool(max_body_chars=5, opener=lambda request, *, timeout: FakeHttpResponse(
             body=b"hello world",

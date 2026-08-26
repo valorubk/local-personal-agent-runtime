@@ -39,3 +39,5 @@
 - [x] 6.4 修复 HTTP Request Tool 的真实 `urlopen` 调用参数、gzip 解压、charset 解码和 HTML 标题解析。
 - [x] 6.5 调整 Runtime，让标题类问题优先返回 HTTP Tool 解析出的可信标题。
 - [x] 6.6 替换默认 `web_search` 占位工具，CLI 内置工具列表只暴露真实可用的 `http_request` 网页请求能力。
+- [x] 6.7 为 HTTP Request Tool 增加回归测试，覆盖默认浏览器风格请求头和用户请求头覆盖默认值。
+- [x] 6.8 修复 HTTP Request Tool 的默认请求头，降低真实网页返回 412 等拒绝状态的概率。

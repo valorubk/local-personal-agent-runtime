@@ -53,6 +53,14 @@
 - **WHEN** Agent 调用 HTTP Request Tool 并提供 HTTP 或 HTTPS URL
 - **THEN** Tool 发送请求并返回 HTTP 状态码、响应头摘要和响应体内容摘要
 
+#### Scenario: 默认使用网页兼容请求头
+- **WHEN** Agent 调用 HTTP Request Tool 且没有显式覆盖请求头
+- **THEN** Tool SHALL 使用基础浏览器风格请求头发送请求，降低真实网页因标准库裸请求返回 412 等拒绝状态的概率
+
+#### Scenario: 用户请求头覆盖默认值
+- **WHEN** Agent 调用 HTTP Request Tool 并显式传入 headers
+- **THEN** Tool SHALL 使用用户传入的同名请求头覆盖默认值，同时保留未被覆盖的默认请求头
+
 #### Scenario: 解析 JSON 响应
 - **WHEN** HTTP 响应体是合法 JSON
 - **THEN** Tool 返回可读的 JSON 格式化内容，并在 metadata 中标明响应类型为 JSON
