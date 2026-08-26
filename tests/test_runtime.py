@@ -211,6 +211,45 @@ class AgentRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result.final_response, "已成功打开网易云音乐。")
 
+    def test_runtime_rejects_app_open_success_claim_without_tool_call(self) -> None:
+        """防止模型没有调用 app_open 工具，却声称本机 App 已成功打开。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MemoryStore(Path(tmp) / "memory.sqlite3")
+            llm = FakeLLMClient([LLMResponse(content="已成功打开IINA。")])
+            runtime = AgentRuntime(
+                settings=self.make_settings(Path(tmp) / "memory.sqlite3"),
+                memory=store,
+                tools=ToolRegistry([SuccessfulAppTool()]),
+                llm=llm,
+            )
+
+            result = runtime.run_turn("打开IINA APP")
+
+        self.assertEqual(result.tool_results, [])
+        self.assertIn("没有实际调用 app_open 工具", result.final_response)
+        self.assertNotIn("已成功打开IINA", result.final_response)
+
+    def test_system_prompt_requires_app_open_tool_for_opening_apps(self) -> None:
+        """防止模型把打开本机 App 这种副作用任务当成普通文本回复。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = MemoryStore(Path(tmp) / "memory.sqlite3")
+            llm = FakeLLMClient([LLMResponse(content="需要调用工具。")])
+            runtime = AgentRuntime(
+                settings=self.make_settings(Path(tmp) / "memory.sqlite3"),
+                memory=store,
+                tools=ToolRegistry([SuccessfulAppTool()]),
+                llm=llm,
+            )
+
+            runtime.run_turn("打开IINA APP")
+
+        system_prompt = llm.messages_seen[0][0]["content"]
+        self.assertIn("打开本机 App", system_prompt)
+        self.assertIn("必须调用 app_open", system_prompt)
+        self.assertIn("不得声称已经打开", system_prompt)
+
     def test_runtime_uses_http_title_metadata_when_user_asks_for_page_title(self) -> None:
         """防止 HTTP Tool 已解析标题后，最终回答仍被 LLM 编造成其他标题。"""
 

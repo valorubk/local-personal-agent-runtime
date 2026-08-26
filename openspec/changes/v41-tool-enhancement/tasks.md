@@ -30,6 +30,8 @@
 - [x] 5.3 调整 App Open Tool，优先扫描 macOS 应用目录并读取本地化显示名后再执行打开。
 - [x] 5.4 调整 Runtime，让成功的 `app_open` 结果不再触发多余排查建议。
 - [x] 5.5 调整 App Open Tool，使无法解码的 `InfoPlist.strings` 不会中断应用目录扫描。
+- [x] 5.6 为 Runtime 增加回归测试，覆盖未实际调用 `app_open` 时不得声明 App 打开成功。
+- [x] 5.7 调整 Runtime 和系统提示，要求打开本机 App 必须调用 `app_open`，并拦截无工具证据的成功声明。
 
 ## 6. HTTP 内容可信度缺陷修复
 

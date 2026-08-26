@@ -34,6 +34,10 @@
 - **WHEN** App Open Tool 成功打开或请求系统打开目标 App
 - **THEN** Agent 最终回复只确认打开成功，不应继续提示用户检查路径、权限或“如果仍然无法打开”的排查建议
 
+#### Scenario: 未调用 App Tool 不得声明打开成功
+- **WHEN** 用户请求打开本机 App，但本轮没有实际执行 App Open Tool
+- **THEN** Agent 最终回复不得声明 App 已经打开成功，应明确说明没有实际调用 `app_open` 工具因此不能确认已打开
+
 #### Scenario: 非 macOS 系统拒绝打开 App
 - **WHEN** Agent 调用打开 App Tool，且当前系统不是 macOS
 - **THEN** Tool 不执行打开动作，并返回清晰说明当前仅支持 macOS 的结构化错误

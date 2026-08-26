@@ -23,6 +23,7 @@ from personal_agent.tools.registry import ToolRegistry
 SYSTEM_PROMPT = """你是 Babyface，一个本地优先的个人 Agent Runtime。
 你通过中文与用户交流。需要本地信息时可以调用工具；工具失败时要解释原因并继续帮助用户。
 当用户请求天气、时间、文件或其他实时信息，且当前可用工具能处理该请求时，应优先调用工具获取结果。
+当用户请求打开本机 App，且可用工具中包含 app_open 时，必须调用 app_open 工具；没有工具成功结果时，不得声称已经打开。
 如果调用工具缺少城市、路径、时间范围等必要参数，应先追问用户补充必要参数，不要直接声称无法获取信息。
 当用户明确要求你记住长期个人信息时，在回答中说明你会保存该信息。
 如果不同 AGENTS.md 之间存在冲突，后出现的、更靠近当前工作目录的指令优先。
@@ -472,6 +473,9 @@ class AgentRuntime:
         app_open_response = self._successful_app_open_response(state)
         if app_open_response:
             content = app_open_response
+        app_open_guard_response = self._app_open_success_claim_guard_response(state, content)
+        if app_open_guard_response:
+            content = app_open_guard_response
         http_title_response = self._http_title_response(state)
         if http_title_response:
             content = http_title_response
@@ -498,6 +502,43 @@ class AgentRuntime:
         if not matched_app:
             return "已成功打开 App。"
         return f"已成功打开{matched_app}。"
+
+    def _app_open_success_claim_guard_response(self, state: RuntimeState, content: str) -> str | None:
+        """拦截“未调用工具却声称已打开 App”的最终回答。
+
+        打开 App 是真实本机副作用，必须以 `app_open` 的执行结果为准。模型有时会
+        在没有 tool_calls 的情况下直接生成“已成功打开”这类文本；这里作为 Runtime
+        兜底，避免用户被一个没有执行证据的回答误导。
+        """
+
+        if "app_open" not in self.tools.names():
+            return None
+        if not self._looks_like_app_open_request(state.get("user_input", "")):
+            return None
+        tool_results = list(state.get("tool_results", []))
+        if any(executed.name == "app_open" for executed in tool_results):
+            return None
+        if not self._claims_app_open_success(content):
+            return None
+        return "没有实际调用 app_open 工具，不能确认 App 已打开。请重新发起打开 App 请求。"
+
+    def _looks_like_app_open_request(self, user_input: str) -> bool:
+        """用轻量规则识别用户是否在请求打开本机 App。"""
+
+        normalized = user_input.casefold()
+        return "打开" in user_input and ("app" in normalized or "应用" in user_input or "软件" in user_input)
+
+    def _claims_app_open_success(self, content: str) -> bool:
+        """判断最终回答是否在宣称 App 已被成功打开。"""
+
+        success_patterns = [
+            r"已(?:经)?成功打开",
+            r"已(?:经)?打开",
+            r"打开成功",
+            r"成功启动",
+            r"已(?:经)?启动",
+        ]
+        return any(re.search(pattern, content) for pattern in success_patterns)
 
     def _http_title_response(self, state: RuntimeState) -> str | None:
         """当用户明确询问网页标题时，优先使用 HTTP Tool 的标题字段。

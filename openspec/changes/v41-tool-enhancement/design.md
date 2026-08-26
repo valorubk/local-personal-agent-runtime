@@ -37,7 +37,7 @@ OS Config Tool 返回平台、版本、架构、主机名、用户目录、语�
 
 App Open Tool 在 macOS 上优先扫描 `/Applications`、`/System/Applications` 和 `~/Applications` 等常见目录中的 `.app` 包，再使用系统能力打开匹配到的 App。扫描时不仅使用 `.app` 目录名，也读取 `InfoPlist.strings` 中的本地化 `CFBundleDisplayName` 和 `CFBundleName`，让“网易云音乐”这类中文描述可以匹配到 `NeteaseMusic.app`。只有最高分候选达到阈值时，才请求系统打开该候选；如果没有候选达到阈值，再尝试按原始输入直接打开，最后仍失败则返回“没有找到足够接近的应用”的结构化错误。
 
-工具参数只接收 App 名称或描述，不暴露任意 shell 命令字符串，从接口层减少注入风险。metadata 记录原始输入、直接打开或模糊匹配的路径、匹配别名、匹配分数和最终候选，便于用户理解为什么打开了某个 App。非 macOS 直接返回不支持。Runtime 在 `app_open` 成功后使用确定性的短确认作为最终回复，避免 LLM 在成功场景下继续输出路径、权限或“如果仍然无法打开”的排查建议。
+工具参数只接收 App 名称或描述，不暴露任意 shell 命令字符串，从接口层减少注入风险。metadata 记录原始输入、直接打开或模糊匹配的路径、匹配别名、匹配分数和最终候选，便于用户理解为什么打开了某个 App。非 macOS 直接返回不支持。Runtime 在 `app_open` 成功后使用确定性的短确认作为最终回复，避免 LLM 在成功场景下继续输出路径、权限或“如果仍然无法打开”的排查建议；如果用户请求打开 App 但本轮没有任何 `app_open` 调用，Runtime 会拦截“已成功打开”等最终回答，明确说明没有实际工具调用证据。
 
 备选方案是复用 Shell Tool 执行 `open -a`，但这会让 App 打开能力混入 Shell 确认策略，也让 LLM 更容易生成任意命令；独立 Tool 的用户意图和安全边界更清楚。
 
