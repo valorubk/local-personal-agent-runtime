@@ -135,6 +135,60 @@ class MainCLITests(unittest.TestCase):
         self.assertIn("MCP Server broken 启动失败：boom", result.stdout)
         self.assertTrue(FakeManager.closed)
 
+    def test_builtin_tool_enhancements_are_registered(self) -> None:
+        """防止新增 Tool 类后忘记接入真实 CLI 启动路径。"""
+
+        class FakeManager:
+            startup_errors = []
+
+            def __init__(self, configs):
+                self.configs = configs
+
+            def start(self):
+                return None
+
+            def tools(self):
+                return []
+
+            def close(self):
+                return None
+
+        class FakeRuntime:
+            tool_names = []
+
+            def __init__(self, **kwargs):
+                FakeRuntime.tool_names = kwargs["tools"].names()
+
+            def run_turn(self, user_input):
+                return RuntimeResult(final_response=f"收到：{user_input}", stream=[f"收到：{user_input}"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings = Settings(
+                openai_api_key="test-key",
+                openai_base_url=None,
+                openai_model="test-model",
+                memory_db_path=root / "memory.sqlite3",
+                shell_timeout_seconds=3,
+                mcp_config_path=root / "mcp.json",
+            )
+            inputs = iter(["/exit"])
+            runner = CliRunner()
+            with (
+                patch("personal_agent.main.load_settings", return_value=settings),
+                patch("personal_agent.main.load_mcp_servers", return_value=[]),
+                patch("personal_agent.main.McpServerManager", FakeManager),
+                patch("personal_agent.main.AgentRuntime", FakeRuntime),
+                patch("personal_agent.main.create_prompt_reader", return_value=lambda prompt: next(inputs)),
+            ):
+                result = runner.invoke(app, [])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("os_config_read", FakeRuntime.tool_names)
+        self.assertIn("app_open", FakeRuntime.tool_names)
+        self.assertIn("http_request", FakeRuntime.tool_names)
+        self.assertNotIn("web_search", FakeRuntime.tool_names)
+
 
 if __name__ == "__main__":
     unittest.main()
